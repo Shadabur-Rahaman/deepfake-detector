@@ -6,3 +6,4 @@ opencv-python==4.9.0.80 # For video processing (frame extraction, etc.)
 numpy==1.26.4      # Common dependency for ML
 pytest==8.2.2           # New
 httpx==0.27.0           # New
+kagglehub==0.3.0 # Or whatever version 'pip show kagglehub' reports after upgrade (e.g., 0.3.x or later)
