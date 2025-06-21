@@ -10,7 +10,6 @@ on:
       - main
 
 jobs:
-  # Job 1: Linting and Testing (Python-specific)
   lint_and_test:
     runs-on: ubuntu-latest
     steps:
@@ -26,13 +25,28 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+        env: # <--- ADD THIS BLOCK
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
 
-      - name: Create ml_artifacts directory and download haarcascade XML
+      - name: Create ml_artifacts directory and download haarcascade XML and ML Model
         run: |
           mkdir -p ml_artifacts
+          # Download Haar Cascade XML
           wget -q https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml -O ml_artifacts/haarcascade_frontalface_default.xml
           # Verify download
           ls -lh ml_artifacts/haarcascade_frontalface_default.xml
+
+          # --- Add this section to download the Kaggle model during CI/CD ---
+          # This will download the model to the runner's ~/.kagglehub/models cache
+          python -c "import kagglehub; print(kagglehub.model_download('ameencaslam/ddp-v4-models/tensorflow/ddpv4-resnet50-finetuned', 'ddpv4_resnet50_finetuned.h5'))"
+          # You can add a check here if the model file is successfully downloaded
+          # For example, look for the file in ~/.kagglehub/models/<long_hash_path>
+          # Or, for CI simplicity, you might copy it into ml_artifacts if you prefer a predictable path.
+          # However, the deepfake_detector.py will look for it in the kagglehub cache, which is fine.
+        env: # <--- ADD THIS BLOCK FOR KAGGLE CREDENTIALS
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGE_KEY }}
 
       - name: Create data directory and dummy sample video for tests
         run: |

@@ -1,8 +1,17 @@
-# app/services/video_processor.py
+# app/services/video_processor.py (UPDATED to use MODEL_INPUT_SIZE from deepfake_detector)
 import cv2
 import numpy as np
 import os
 from typing import List, Tuple, Optional
+
+# Import the MODEL_INPUT_SIZE from deepfake_detector to keep consistency
+# Ensure that app/services/deepfake_detector.py exists and defines MODEL_INPUT_SIZE
+try:
+    from app.services.deepfake_detector import MODEL_INPUT_SIZE
+except ImportError:
+    # Fallback if deepfake_detector isn't set up yet or MODEL_INPUT_SIZE is missing
+    print("Warning: Could not import MODEL_INPUT_SIZE from deepfake_detector. Using default (224, 224).")
+    MODEL_INPUT_SIZE = (224, 224)
 
 # Path to the Haar Cascade XML file.
 # You need to download 'haarcascade_frontalface_default.xml' and place it in ml_artifacts/.
@@ -15,7 +24,8 @@ face_cascade = cv2.CascadeClassifier(HAARCASCADE_PATH)
 
 def extract_faces_from_video(
     video_path: str,
-    target_size: Tuple[int, int] = (224, 224), # Common input size for CNNs
+    # Use the model's required input size here by default
+    target_size: Tuple[int, int] = MODEL_INPUT_SIZE,
     frames_to_process: Optional[int] = None, # Process all if None, otherwise a fixed number
     frame_interval: int = 1 # Process every Nth frame
 ) -> List[np.ndarray]:
@@ -44,8 +54,6 @@ def extract_faces_from_video(
         if frame_count % frame_interval == 0:
             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             # Detect faces in the grayscale frame
-            # scaleFactor: Parameter specifying how much the image size is reduced at each image scale.
-            # minNeighbors: Parameter specifying how many neighbors each candidate rectangle should have to retain it.
             faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
 
             for (x, y, w, h) in faces:
@@ -55,9 +63,8 @@ def extract_faces_from_video(
                 # Resize the face image to the target size
                 resized_face = cv2.resize(face_img, target_size, interpolation=cv2.INTER_AREA)
 
-                # Normalize pixel values (e.g., 0-1, or -1 to 1 depending on model requirements)
-                # For most deep learning models expecting 0-255 images, simple conversion to float32 is enough.
-                # If a model expects -1 to 1, you'd do: (resized_face.astype(np.float32) / 127.5) - 1
+                # Normalize pixel values (0-1 float32 is common for deep learning models)
+                # Ensure this matches your specific model's training normalization!
                 normalized_face = resized_face.astype(np.float32) / 255.0
 
                 extracted_faces.append(normalized_face)
