@@ -28,7 +28,7 @@ jobs:
           pip install -r requirements.txt
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }} # <-- FIXED: Added 'L' here
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
 
       - name: Create ml_artifacts directory and download haarcascade XML and ML Model
         run: |
@@ -38,13 +38,7 @@ jobs:
           # Verify download
           ls -lh ml_artifacts/haarcascade_frontalface_default.xml
 
-          # --- REMOVED KAGGLEHUB MODEL DOWNLOAD HERE ---
-          # This section caused too many issues with model availability and access.
-          # We are now relying on Git LFS to track the model (ResNet50) from your repo.
-          # python -c "import kagglehub; print(kagglehub.model_download('ameencaslam/ddp-v4-models/tensorflow/ddpv4-resnet50-finetuned', 'ddpv4_resnet50_finetuned.h5'))"
-        env:
-          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }} # <-- FIXED: Added 'L' here
+          # We are relying on Git LFS to track the model (ResNet50) from your repo.
 
       - name: Create data directory and dummy sample video for tests
         run: |
@@ -73,13 +67,16 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        # Note: If Git LFS is failing in CI, you might need to use actions/checkout@v3 or explicitly fetch LFS
+        # If your model.h5 is very large, this step might fail to clone it fully.
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Docker Hub (if DOCKER_USERNAME secret is present)
-        # CHANGED: More robust check for secret existence
-        if: ${{ github.event_name == 'push' && github.repository_owner == 'Shadabur-Rahaman' && secrets.DOCKER_USERNAME && secrets.DOCKER_PASSWORD }} # <-- FIXED Line 93
+      - name: Log in to Docker Hub (if secrets are configured)
+        # REMOVED the 'if' condition completely. This step will always run.
+        # It will fail at runtime if secrets.DOCKER_USERNAME/PASSWORD are empty/invalid,
+        # but the YAML parser will no longer complain.
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -89,7 +86,8 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          # Push only if secrets are available and it's a push event from your repo
+          # This 'push' condition still uses secrets to control pushing.
+          # If your Docker Hub secrets are NOT set, it won't attempt to push.
           push: ${{ github.event_name == 'push' && github.repository_owner == 'Shadabur-Rahaman' && secrets.DOCKER_USERNAME && secrets.DOCKER_PASSWORD }}
           tags: Shadabur-Rahaman/deepfake-detector:latest,Shadabur-Rahaman/deepfake-detector:${{ github.sha }}
           cache-from: type=gha
