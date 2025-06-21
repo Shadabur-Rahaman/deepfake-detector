@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Deepfake Detection Tool</title>
+    <!-- Chosen Palette: Cool Neutrals & Tech Blue -->
+    <!-- Application Structure Plan: A task-oriented, single-page application designed to first educate the user and then allow them to interact with a simulated tool. The flow is: 1. Hero section for introduction. 2. "What is a Deepfake?" for basic concepts via a visual diagram. 3. "Common Manipulation Techniques" for categorized info. 4. The core "How Detection Works" section, which includes the main interactive analysis tool, educating the user on the 'why' behind the results. 5. A "Detection Challenge" chart to provide context on the evolving problem. 6. A final "Key Takeaways" section. This structure prioritizes understanding before interaction, making the tool's simulated output more meaningful. -->
+    <!-- Visualization & Content Choices: 1. Conceptual Flow (HTML/CSS): Goal: Inform. Method: Styled divs with flexbox to create a simple, accessible diagram. 2. Manipulation Techniques (HTML/JS): Goal: Organize. Method: Clickable buttons to toggle content visibility, keeping the UI clean. 3. Simulated Detector (HTML/JS): Goal: Interact/Inform. Method: A fake file upload that triggers a JS-driven animation and generates a randomized but plausible result, reinforcing concepts from the educational sections. 4. Detection Race Chart (Chart.js): Goal: Show Change. Method: A line chart to visualize the cat-and-mouse game between deepfake creation and detection. Justification: These choices create an engaging narrative, are lightweight, and avoid external dependencies beyond the required libraries. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f0f2f5;
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 40vh;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+        .nav-link {
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: #3B82F6;
+            border-bottom-color: #3B82F6;
+        }
+        .content-section {
+            display: none;
+        }
+        .content-section.active {
+            display: block;
+        }
+        .loader {
+            border-top-color: #3B82F6;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
+
+        <!-- Header -->
+        <header class="text-center mb-12">
+            <h1 class="text-4xl md:text-6xl font-extrabold text-slate-900">Deepfake Detection Center</h1>
+            <p class="mt-4 text-lg text-slate-600 max-w-3xl mx-auto">An interactive guide to understanding and identifying synthetic media. Explore the concepts, then try our simulated analysis tool.</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="mb-10 border-b border-slate-300">
+            <ul class="flex items-center justify-center flex-wrap -mb-px text-sm font-medium text-center text-slate-500">
+                <li class="mr-2"><a href="#introduction" class="nav-link inline-block p-4 border-b-2 border-transparent rounded-t-lg">Introduction</a></li>
+                <li class="mr-2"><a href="#detector" class="nav-link inline-block p-4 border-b-2 border-transparent rounded-t-lg">Detection Tool</a></li>
+                <li class="mr-2"><a href="#challenge" class="nav-link inline-block p-4 border-b-2 border-transparent rounded-t-lg">The Challenge</a></li>
+                <li class="mr-2"><a href="#takeaways" class="nav-link inline-block p-4 border-b-2 border-transparent rounded-t-lg">Takeaways</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <!-- Introduction Section -->
+            <section id="introduction" class="content-section space-y-12">
+                <div class="bg-white p-8 rounded-2xl shadow-lg">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-4 text-center">What is a Deepfake?</h2>
+                    <p class="text-center text-slate-600 mb-8">A deepfake is synthetic media where a person in an existing image or video is replaced with someone else's likeness. This is typically achieved using powerful machine learning techniques called Generative Adversarial Networks (GANs).</p>
+                    <div class="flex flex-col md:flex-row items-center justify-center space-y-6 md:space-y-0 md:space-x-6 text-center">
+                        <div class="p-4 bg-slate-50 rounded-lg w-full md:w-1/4">
+                            <p class="text-5xl mb-2">🖼️</p>
+                            <h3 class="font-bold">Training Data</h3>
+                            <p class="text-sm text-slate-500">Thousands of images of two individuals (Source A and Target B).</p>
+                        </div>
+                        <div class="text-4xl text-blue-500 font-mono self-center transform md:rotate-0 rotate-90">&rarr;</div>
+                        <div class="p-4 bg-slate-50 rounded-lg w-full md:w-1/3">
+                            <p class="text-5xl mb-2">🧠</p>
+                            <h3 class="font-bold">AI Model (GAN)</h3>
+                            <p class="text-sm text-slate-500">An AI model learns the facial features and expressions from the training data.</p>
+                        </div>
+                        <div class="text-4xl text-blue-500 font-mono self-center transform md:rotate-0 rotate-90">&rarr;</div>
+                        <div class="p-4 bg-slate-50 rounded-lg w-full md:w-1/4">
+                             <p class="text-5xl mb-2">🎬</p>
+                            <h3 class="font-bold">Synthetic Output</h3>
+                            <p class="text-sm text-slate-500">The model generates a new video, swapping the face of Person A onto Person B.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-8 rounded-2xl shadow-lg">
+                     <h2 class="text-3xl font-bold text-slate-900 mb-6 text-center">Common Manipulation Techniques</h2>
+                     <div id="manipulation-buttons" class="flex justify-center flex-wrap gap-3 mb-6">
+                        <button data-target="face-swap" class="manipulation-btn bg-blue-500 text-white py-2 px-4 rounded-full font-semibold shadow">Face Swap</button>
+                        <button data-target="expression-swap" class="manipulation-btn bg-slate-200 text-slate-700 py-2 px-4 rounded-full font-semibold">Expression Swap</button>
+                        <button data-target="lip-sync" class="manipulation-btn bg-slate-200 text-slate-700 py-2 px-4 rounded-full font-semibold">Lip Sync</button>
+                     </div>
+                     <div id="manipulation-content" class="p-6 bg-slate-50 rounded-lg min-h-[120px]">
+                        <div id="face-swap" class="manipulation-info">
+                            <h3 class="font-bold text-lg text-slate-800">Face Swap</h3>
+                            <p class="text-slate-600">The most common type. The entire face of a source person is grafted onto a target person in a video, while attempting to match lighting and orientation.</p>
+                        </div>
+                        <div id="expression-swap" class="manipulation-info hidden">
+                            <h3 class="font-bold text-lg text-slate-800">Expression Swap (Puppeteering)</h3>
+                            <p class="text-slate-600">The facial expressions (like smiling or frowning) of a source person are transferred to a target person, essentially making them a "puppet."</p>
+                        </div>
+                         <div id="lip-sync" class="manipulation-info hidden">
+                            <h3 class="font-bold text-lg text-slate-800">Lip Sync</h3>
+                            <p class="text-slate-600">The mouth region of a target is manipulated to match a new audio track, making it appear as if they are saying something they are not.</p>
+                        </div>
+                     </div>
+                </div>
+            </section>
+
+            <!-- Detector Section -->
+            <section id="detector" class="content-section">
+                 <div class="bg-white p-8 rounded-2xl shadow-lg">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-2 text-center">Simulated Detection Tool</h2>
+                    <p class="text-center text-slate-600 mb-8 max-w-2xl mx-auto">This tool simulates a deepfake analysis. "Upload" a file to begin the process. Our simulated AI will check for common artifacts based on established detection methods.</p>
+                    
+                    <div class="grid md:grid-cols-2 gap-8 items-start">
+                        <!-- Left Panel: The Tool -->
+                        <div class="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                             <h3 class="font-bold text-xl mb-4 text-slate-800">1. Upload File</h3>
+                            <div class="mb-4">
+                                <label for="file-upload" class="w-full cursor-pointer bg-white border border-slate-300 rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-slate-100 transition-colors">
+                                    <span class="text-5xl">📤</span>
+                                    <span id="file-name" class="mt-2 text-sm font-semibold text-blue-600">Click to select a file</span>
+                                    <p class="text-xs text-slate-500 mt-1">No file is actually uploaded</p>
+                                </label>
+                                <input id="file-upload" type="file" class="hidden"/>
+                            </div>
+                            <button id="analyze-btn" disabled class="w-full bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-blue-600 transition-all disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none">
+                                Analyze Video
+                            </button>
+                        </div>
+
+                        <!-- Right Panel: The Results -->
+                         <div class="bg-slate-50 p-6 rounded-xl border border-slate-200 min-h-[280px] flex flex-col justify-center">
+                            <h3 class="font-bold text-xl mb-4 text-slate-800">2. Analysis Report</h3>
+                            <div id="result-container" class="text-center">
+                                <p class="text-slate-500">Results will appear here...</p>
+                            </div>
+                         </div>
+                    </div>
+                 </div>
+            </section>
+
+            <!-- Challenge Section -->
+            <section id="challenge" class="content-section">
+                <div class="bg-white p-8 rounded-2xl shadow-lg">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-2 text-center">The Detection Challenge</h2>
+                    <p class="text-center text-slate-600 mb-8">Deepfake generation and detection is a constant "cat-and-mouse" game. As detection models improve, so do the techniques for creating more realistic fakes.</p>
+                    <div class="chart-container">
+                        <canvas id="detectionChallengeChart"></canvas>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Takeaways Section -->
+            <section id="takeaways" class="content-section">
+                <div class="bg-white p-8 rounded-2xl shadow-lg">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-6 text-center">Key Takeaways & Future Outlook</h2>
+                    <div class="grid md:grid-cols-3 gap-6 text-center">
+                        <div class="bg-slate-50 p-6 rounded-lg">
+                            <h3 class="font-bold text-lg text-blue-600 mb-2">Increasing Sophistication</h3>
+                            <p class="text-slate-600 text-sm">Synthetic media will become harder to distinguish from reality, requiring more advanced, multi-modal (video, audio, text) detection systems.</p>
+                        </div>
+                        <div class="bg-slate-50 p-6 rounded-lg">
+                            <h3 class="font-bold text-lg text-blue-600 mb-2">Beyond Faces</h3>
+                            <p class="text-slate-600 text-sm">Future challenges include full-body deepfakes, voice synthesis (voice cloning), and entirely AI-generated environments and scenarios.</p>
+                        </div>
+                        <div class="bg-slate-50 p-6 rounded-lg">
+                            <h3 class="font-bold text-lg text-blue-600 mb-2">The Need for Awareness</h3>
+                            <p class="text-slate-600 text-sm">Promoting digital literacy and critical thinking is as important as developing technical tools. Always question the source and context of media.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // --- Navigation Logic ---
+    const navLinks = document.querySelectorAll('.nav-link');
+    const contentSections = document.querySelectorAll('.content-section');
+
+    function updateActiveContent() {
+        const hash = window.location.hash || '#introduction';
+        
+        navLinks.forEach(link => {
+            if (link.getAttribute('href') === hash) {
+                link.classList.add('active');
+            } else {
+                link.classList.remove('active');
+            }
+        });
+
+        contentSections.forEach(section => {
+            if ('#' + section.id === hash) {
+                section.classList.add('active');
+            } else {
+                section.classList.remove('active');
+            }
+        });
+    }
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', function (e) {
+            e.preventDefault();
+            window.location.hash = this.getAttribute('href');
+        });
+    });
+    
+    window.addEventListener('hashchange', updateActiveContent);
+    updateActiveContent(); // Initial call
+
+    // --- Manipulation Techniques Logic ---
+    const manipulationBtns = document.querySelectorAll('.manipulation-btn');
+    const manipulationInfos = document.querySelectorAll('.manipulation-info');
+
+    manipulationBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+
+            manipulationBtns.forEach(b => {
+                b.classList.remove('bg-blue-500', 'text-white');
+                b.classList.add('bg-slate-200', 'text-slate-700');
+            });
+            btn.classList.add('bg-blue-500', 'text-white');
+            btn.classList.remove('bg-slate-200', 'text-slate-700');
+
+            manipulationInfos.forEach(info => {
+                if (info.id === targetId) {
+                    info.classList.remove('hidden');
+                } else {
+                    info.classList.add('hidden');
+                }
+            });
+        });
+    });
+
+    // --- Chart.js Logic ---
+    const ctx = document.getElementById('detectionChallengeChart');
+    if (ctx) {
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: ['2020', '2021', '2022', '2023', '2024', '2025 (Est.)'],
+                datasets: [{
+                    label: 'Deepfake Sophistication',
+                    data: [45, 55, 70, 75, 85, 92],
+                    borderColor: 'rgb(239, 68, 68)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                }, {
+                    label: 'Detection Model Accuracy',
+                    data: [60, 68, 72, 80, 84, 88],
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: {
+                            display: true,
+                            text: 'Relative Score / Accuracy (%)'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // --- Simulated Detector Logic ---
+    const fileUpload = document.getElementById('file-upload');
+    const analyzeBtn = document.getElementById('analyze-btn');
+    const fileNameEl = document.getElementById('file-name');
+    const resultContainer = document.getElementById('result-container');
+
+    const possibleArtifacts = [
+        'Inconsistent eye blinking patterns',
+        'Lack of natural head micro-movements',
+        'Unnatural or blurry edges around the face',
+        'Mismatched lighting between face and background',
+        'Gaze direction appears fixed or unnatural',
+        'Skin texture is too smooth or waxy',
+        'Subtle video compression inconsistencies',
+        'Audio-visual sync errors in speech',
+    ];
+
+    fileUpload.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const fakeFileName = e.target.files[0].name;
+            fileNameEl.textContent = fakeFileName.length > 30 ? fakeFileName.substring(0, 27) + '...' : fakeFileName;
+            analyzeBtn.disabled = false;
+        }
+    });
+
+    analyzeBtn.addEventListener('click', () => {
+        analyzeBtn.disabled = true;
+        resultContainer.innerHTML = `
+            <div class="flex flex-col items-center justify-center">
+                <div class="loader h-12 w-12 rounded-full border-4 border-slate-200"></div>
+                <p class="mt-4 font-semibold text-blue-600">Analyzing frames...</p>
+                <p class="text-sm text-slate-500">This may take a moment.</p>
+            </div>
+        `;
+
+        setTimeout(() => {
+            const isDeepfake = Math.random() < 0.6; // 60% chance of being a deepfake
+            const confidence = isDeepfake ? Math.random() * (0.98 - 0.75) + 0.75 : Math.random() * (0.95 - 0.60) + 0.60;
+            
+            let resultHTML = '';
+
+            if (isDeepfake) {
+                const numArtifacts = Math.floor(Math.random() * 3) + 2; // 2 to 4 artifacts
+                const foundArtifacts = [...possibleArtifacts].sort(() => 0.5 - Math.random()).slice(0, numArtifacts);
+
+                resultHTML = `
+                    <div class="text-left p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <div class="flex items-center mb-2">
+                             <span class="text-2xl mr-3">⚠️</span>
+                             <div>
+                                <h4 class="font-extrabold text-xl text-red-700">DEEPFAKE DETECTED</h4>
+                                <p class="font-semibold text-red-600">Confidence: ${(confidence * 100).toFixed(2)}%</p>
+                             </div>
+                        </div>
+                        <p class="font-semibold text-sm text-slate-700 mt-4 mb-2">Potential Artifacts Found:</p>
+                        <ul class="list-disc list-inside text-sm text-slate-600 space-y-1">
+                            ${foundArtifacts.map(artifact => `<li>${artifact}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            } else {
+                 resultHTML = `
+                    <div class="text-left p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <div class="flex items-center mb-2">
+                            <span class="text-2xl mr-3">✅</span>
+                            <div>
+                                <h4 class="font-extrabold text-xl text-green-700">LIKELY REAL</h4>
+                                <p class="font-semibold text-green-600">Confidence: ${(confidence * 100).toFixed(2)}%</p>
+                            </div>
+                        </div>
+                         <p class="font-semibold text-sm text-slate-700 mt-4 mb-2">Analysis Notes:</p>
+                         <p class="text-sm text-slate-600">The media appears consistent with known biometric and forensic markers. No significant manipulation artifacts were detected.</p>
+                    </div>
+                `;
+            }
+            resultContainer.innerHTML = resultHTML;
+            analyzeBtn.disabled = false;
+        }, 2500); // Simulate analysis time
+    });
+
+});
+</script>
+
+</body>
+</html>
