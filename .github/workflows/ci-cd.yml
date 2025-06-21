@@ -1,3 +1,4 @@
+# .github/workflows/ci-cd.yml
 
 name: CI/CD Pipeline
 
@@ -25,9 +26,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-        env: # <--- ADD THIS BLOCK
+        env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }} # <-- FIXED: Added 'L' here
 
       - name: Create ml_artifacts directory and download haarcascade XML and ML Model
         run: |
@@ -37,26 +38,18 @@ jobs:
           # Verify download
           ls -lh ml_artifacts/haarcascade_frontalface_default.xml
 
-          # --- Add this section to download the Kaggle model during CI/CD ---
-          # This will download the model to the runner's ~/.kagglehub/models cache
-          python -c "import kagglehub; print(kagglehub.model_download('ameencaslam/ddp-v4-models/tensorflow/ddpv4-resnet50-finetuned', 'ddpv4_resnet50_finetuned.h5'))"
-          # You can add a check here if the model file is successfully downloaded
-          # For example, look for the file in ~/.kagglehub/models/<long_hash_path>
-          # Or, for CI simplicity, you might copy it into ml_artifacts if you prefer a predictable path.
-          # However, the deepfake_detector.py will look for it in the kagglehub cache, which is fine.
-        env: # <--- ADD THIS BLOCK FOR KAGGLE CREDENTIALS
+          # --- REMOVED KAGGLEHUB MODEL DOWNLOAD HERE ---
+          # This section caused too many issues with model availability and access.
+          # We are now relying on Git LFS to track the model (ResNet50) from your repo.
+          # python -c "import kagglehub; print(kagglehub.model_download('ameencaslam/ddp-v4-models/tensorflow/ddpv4-resnet50-finetuned', 'ddpv4_resnet50_finetuned.h5'))"
+        env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
-          KAGGLE_KEY: ${{ secrets.KAGGE_KEY }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }} # <-- FIXED: Added 'L' here
 
       - name: Create data directory and dummy sample video for tests
         run: |
           mkdir -p data
-          # Create a very small, valid MP4 for testing.
-          # This requires ffmpeg on the runner, which is usually pre-installed on ubuntu-latest.
-          # If not, you might need an additional step to install ffmpeg.
           ffmpeg -f lavfi -i nullsrc=s=128x128:d=1 -f lavfi -i color=c=red:s=128x128:d=1 -filter_complex "[0][1]overlay=format=auto,format=yuv420p" -c:v libx264 -preset superfast -crf 30 -an data/sample_video.mp4 || echo "ffmpeg not found or failed, proceeding without live video test."
-          # If ffmpeg isn't available or fails, this test might skip or fail if `data/sample_video.mp4` is critical.
-          # For a more robust solution, commit a tiny sample_video.mp4 to your repo directly.
 
       - name: Run Linting (Flake8)
         run: |
@@ -70,16 +63,12 @@ jobs:
           black --check .
 
       - name: Run Unit Tests
-        # API_BASE_URL is not set here, so test_api.py will use its default localhost
-        # This job primarily focuses on isolated unit tests (like test_ml_logic.py)
-        # and pre-checks before spinning up Docker services.
         run: pytest tests/test_ml_logic.py
 
-  # Job 2: Build and Push Docker Image (after linting and unit tests pass)
   build_and_push_docker:
     runs-on: ubuntu-latest
-    needs: lint_and_test # This job depends on lint_and_test passing
-    environment: production # Use an environment for secrets management (optional but good practice)
+    needs: lint_and_test
+    environment: production
 
     steps:
       - name: Checkout Repository
@@ -89,8 +78,8 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub (if DOCKER_USERNAME secret is present)
-        # Only attempt login if secrets are provided, making this step optional.
-        if: github.event_name == 'push' && github.repository_owner == 'Shadabur-Rahaman' && secrets.DOCKER_USERNAME != ''
+        # CHANGED: More robust check for secret existence
+        if: ${{ github.event_name == 'push' && github.repository_owner == 'Shadabur-Rahaman' && secrets.DOCKER_USERNAME && secrets.DOCKER_PASSWORD }} # <-- FIXED Line 93
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
@@ -100,33 +89,29 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.repository_owner == 'Shadabur-Rahaman' && secrets.DOCKER_USERNAME != '' }} # Only push on push events and if secrets are available
+          # Push only if secrets are available and it's a push event from your repo
+          push: ${{ github.event_name == 'push' && github.repository_owner == 'Shadabur-Rahaman' && secrets.DOCKER_USERNAME && secrets.DOCKER_PASSWORD }}
           tags: Shadabur-Rahaman/deepfake-detector:latest,Shadabur-Rahaman/deepfake-detector:${{ github.sha }}
-          cache-from: type=gha # Use GitHub Actions cache for faster builds
+          cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Job 3: Integration Tests (runs against the Dockerized app)
   integration_tests:
     runs-on: ubuntu-latest
-    needs: build_and_push_docker # This job depends on the Docker image being built
-    environment: test # Use a test environment (optional)
+    needs: build_and_push_docker
+    environment: test
 
-    # Define the FastAPI app as a service
     services:
       app:
-        image: Shadabur-Rahaman/deepfake-detector:latest # Use the image built in the previous step
+        image: Shadabur-Rahaman/deepfake-detector:latest
         ports:
           - 8000:8000
         env:
-          # Set the BASE_URL for the integration tests to point to the service
           API_BASE_URL: http://app:8000
-        # Optional: Add a healthcheck to ensure the service is ready before tests run
         options: >-
           --health-cmd "curl --fail http://localhost:8000/health || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
 
     steps:
       - name: Checkout Repository
@@ -141,22 +126,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest-asyncio # Needed for async tests
+          pip install pytest-asyncio
 
       - name: Create data directory and dummy sample video for tests
         run: |
           mkdir -p data
-          # Re-create the sample video for the test runner environment
           ffmpeg -f lavfi -i nullsrc=s=128x128:d=1 -f lavfi -i color=c=red:s=128x128:d=1 -filter_complex "[0][1]overlay=format=auto,format=yuv420p" -c:v libx264 -preset superfast -crf 30 -an data/sample_video.mp4 || echo "ffmpeg not found or failed, proceeding without live video test."
 
-
       - name: Wait for FastAPI service to be healthy
-        # This step uses a simple bash loop to wait for the health check endpoint
-        # The 'services.app.options' health check is better, but this provides a fallback.
         run: |
           echo "Waiting for app service to be ready..."
           ATTEMPTS=0
-          MAX_ATTEMPTS=60 # Up to 60 * 1 second = 1 minute wait
+          MAX_ATTEMPTS=60
           while ! curl -s http://app:8000/health > /dev/null; do
             if [ $ATTEMPTS -ge $MAX_ATTEMPTS ]; then
               echo "App service did not become healthy in time."
@@ -169,5 +150,5 @@ jobs:
 
       - name: Run API Integration Tests
         env:
-          API_BASE_URL: http://app:8000 # This sets the env var for test_api.py
+          API_BASE_URL: http://app:8000
         run: pytest tests/test_api.py
