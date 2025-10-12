@@ -1,0 +1,4 @@
+Requirement already satisfied: argon2-cffi in /home/raham/miniconda3/envs/deepfake-env/lib/python3.11/site-packages (25.1.0)
+Requirement already satisfied: argon2-cffi-bindings in /home/raham/miniconda3/envs/deepfake-env/lib/python3.11/site-packages (from argon2-cffi) (25.1.0)
+Requirement already satisfied: cffi>=1.0.1 in /home/raham/miniconda3/envs/deepfake-env/lib/python3.11/site-packages (from argon2-cffi-bindings->argon2-cffi) (2.0.0)
+Requirement already satisfied: pycparser in /home/raham/miniconda3/envs/deepfake-env/lib/python3.11/site-packages (from cffi>=1.0.1->argon2-cffi-bindings->argon2-cffi) (2.22)

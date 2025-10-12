@@ -1,2 +1,346 @@
-ml_artifacts/deepfake_detector.pth
-ml_artifacts/deepfake_detector.pth
+# =============================================================================
+# DEEPFAKE DETECTOR - PRODUCTION .GITIGNORE
+# =============================================================================
+# This file excludes development files, temporary data, and sensitive information
+# from the production GitHub repository
+
+# =============================================================================
+# DATABASE FILES
+# =============================================================================
+*.db
+*.sqlite
+*.sqlite3
+deepfake_detection.db
+detection_jobs.db
+enhanced_detection_jobs.db
+ifake_auth.db
+simple_auth.db
+auth.db
+
+# =============================================================================
+# LOG FILES
+# =============================================================================
+*.log
+logs/
+app*.log
+auth*.log
+comprehensive_auth.log
+auth_system.log
+app_startup*.log
+deepfake_detection.log
+
+# =============================================================================
+# PYTHON CACHE & BUILD ARTIFACTS
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# =============================================================================
+# VIRTUAL ENVIRONMENTS
+# =============================================================================
+deepfake-env/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+.env/
+
+# =============================================================================
+# TEMPORARY & DEBUG FILES
+# =============================================================================
+temp/
+tmp/
+*.tmp
+*.temp
+debug_frame_*.jpg
+debug_frame_*.png
+*.debug
+debug_*.py
+debug_*.txt
+
+# =============================================================================
+# UPLOADED & DOWNLOADED CONTENT
+# =============================================================================
+downloaded_videos/
+uploaded_videos/
+storage/uploads/
+storage/downloads/
+uploads/
+downloads/
+
+# =============================================================================
+# PROCESSED DATA & FACES
+# =============================================================================
+processed_faces/
+processed_faces_optimized/
+processed_data/
+face_extractions/
+
+# =============================================================================
+# IDE & EDITOR FILES
+# =============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =============================================================================
+# FRONTEND BUILD ARTIFACTS
+# =============================================================================
+frontend/dist/
+frontend/build/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.nuxt/
+frontend/.cache/
+
+# =============================================================================
+# SENSITIVE FILES & API KEYS
+# =============================================================================
+config.env
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.key
+*.pub
+ghp_*
+gho_*
+ghu_*
+ghs_*
+ghr_*
+
+# =============================================================================
+# TEST & DEBUG SCRIPTS
+# =============================================================================
+fix_*.py
+test_*.py
+!test_installation.py
+start_*.py
+debug_*.py
+repair_*.py
+diagnose_*.py
+quick_*.py
+nuclear_*.py
+super_*.py
+manual_*.py
+run_*.py
+kill_*.py
+clean_*.py
+show_*.py
+get_*.py
+apply_*.py
+
+# =============================================================================
+# BACKUP & DUPLICATE FILES
+# =============================================================================
+*_backup*.py
+main_backup*.py
+main_*.py
+!main.py
+*_old.py
+*_copy.py
+*_duplicate.py
+
+# =============================================================================
+# DOCUMENTATION DRAFTS & FIXES
+# =============================================================================
+*_SUMMARY.md
+*_FIXES*.md
+*_GUIDE.md
+REPAIR_*.md
+FIX_*.md
+*_FIX_SUMMARY.md
+*_FIXES_SUMMARY.md
+*_ERROR*.md
+*_SOLUTION.md
+*_IMPLEMENTATION*.md
+*_INTEGRATION*.md
+*_COMPLETE*.md
+*_ENHANCED*.md
+*_PRODUCTION*.md
+*_DEPLOYMENT*.md
+*_STARTUP*.md
+*_AUTH*.md
+*_BACKEND*.md
+*_FRONTEND*.md
+*_MODERN*.md
+*_ADVANCED*.md
+*_SOPHISTICATED*.md
+*_ULTRA*.md
+*_BIAS*.md
+*_NUMPY*.md
+*_CUDA*.md
+*_PYTORCH*.md
+*_MTCNN*.md
+*_OPTIMIZATION*.md
+*_DETERMINISTIC*.md
+*_MVP*.md
+*_2025*.md
+
+# =============================================================================
+# TEMPORARY HTML & FILES
+# =============================================================================
+*.html
+!docs.html
+!index.html
+!frontend/index.html
+*.htm
+
+# =============================================================================
+# JUPYTER NOTEBOOKS (if any)
+# =============================================================================
+.ipynb_checkpoints
+*.ipynb
+
+# =============================================================================
+# COVERAGE REPORTS
+# =============================================================================
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# =============================================================================
+# CELERY & REDIS
+# =============================================================================
+celerybeat-schedule
+celerybeat.pid
+
+# =============================================================================
+# MYPY
+# =============================================================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# =============================================================================
+# JUPYTER
+# =============================================================================
+.jupyter/
+
+# =============================================================================
+# SPHINX DOCUMENTATION
+# =============================================================================
+docs/_build/
+
+# =============================================================================
+# PYCHARM
+# =============================================================================
+.idea/
+
+# =============================================================================
+# VSCode
+# =============================================================================
+.vscode/
+
+# =============================================================================
+# LOCAL ENVIRONMENT FILES
+# =============================================================================
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# =============================================================================
+# PACKAGE MANAGER LOCK FILES (keep package.json, ignore lock files for flexibility)
+# =============================================================================
+# package-lock.json
+# yarn.lock
+
+# =============================================================================
+# MODEL CACHE & TEMPORARY MODEL FILES
+# =============================================================================
+model_cache/
+.cache/
+cache/
+*.cache
+
+# =============================================================================
+# CUDA & GPU RELATED TEMP FILES
+# =============================================================================
+cuda_*.run
+*.deb
+*.rpm
+
+# =============================================================================
+# BACKUP CONFIGURATION FILES
+# =============================================================================
+fallback_auth.json
+unified_auth.json
+
+# =============================================================================
+# FILE DATABASE
+# =============================================================================
+file_db/
+*.json
+!package.json
+!tsconfig.json
+!tailwind.config.ts
+!vite.config.ts
+
+# =============================================================================
+# RESULTS & OUTPUT FILES
+# =============================================================================
+results/
+outputs/
+*.png
+*.jpg
+*.jpeg
+!favicon.*
+!logo.*
+!*.png
+!*.jpg
+!*.jpeg
+!frontend/public/*.png
+!frontend/public/*.jpg
+!frontend/public/*.jpeg
+
+# =============================================================================
+# SCRIPTS DIRECTORY (development scripts)
+# =============================================================================
+scripts/
+tools/
+
+# =============================================================================
+# ADDITIONAL DEVELOPMENT FILES
+# =============================================================================
+*.orig
+*.rej
+*~
+.#*
+#*#

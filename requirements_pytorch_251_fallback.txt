@@ -1,0 +1,108 @@
+# === PyTorch 2.5.1 Fallback Requirements ===
+# Use this file if PyTorch 2.6 causes weights_only issues
+# This provides maximum compatibility for model loading
+
+# Core FastAPI dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+
+# === PyTorch 2.5.1 + CUDA 12.1 for Maximum Compatibility ===
+# These versions avoid weights_only=True issues in PyTorch 2.6
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+torchaudio==2.5.1+cu121
+--index-url https://download.pytorch.org/whl/cu121
+
+# === YOLOv8 for CUDA Backend ===
+# Version 8.0.196 works with PyTorch 2.5.1
+ultralytics==8.0.196
+
+# Computer Vision and Image Processing
+opencv-python>=4.8.0
+pillow>=10.0.0
+numpy>=1.24.0
+
+# Machine Learning and Deep Learning
+tensorflow>=2.13.0
+scikit-learn>=1.3.0
+
+# Face Detection and Processing
+mtcnn>=0.1.1
+
+# Transformers and Advanced Models
+transformers>=4.35.0
+timm>=0.9.12
+
+# AI Services
+google-generativeai>=0.3.0
+openai>=1.0.0
+
+# Additional utilities
+kagglehub>=0.3.0
+pytest>=7.4.0
+httpx>=0.25.0
+
+# Video processing
+yt-dlp>=2023.12.30
+
+# Additional ML libraries
+torchmetrics>=0.11.0
+
+# Image processing enhancements
+albumentations>=1.3.0
+imgaug>=0.4.0
+
+# Scientific computing
+scipy>=1.11.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Face recognition
+face-recognition>=1.3.0
+dlib>=19.24.0
+
+# Audio processing (for video analysis)
+librosa>=0.10.0
+
+# Progress bars
+tqdm>=4.65.0
+
+# Configuration management
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Logging and monitoring
+loguru>=0.7.0
+
+# Async utilities
+asyncio-mqtt>=0.11.0
+aiohttp>=3.8.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Testing
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# === INSTALLATION INSTRUCTIONS ===
+# 1. First, uninstall existing PyTorch:
+#    pip uninstall torch torchvision torchaudio -y
+#
+# 2. Install PyTorch 2.5.1 with CUDA:
+#    pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+#
+# 3. Install YOLOv8:
+#    pip install ultralytics==8.0.196
+#
+# 4. Install remaining dependencies:
+#    pip install -r requirements_pytorch_251_fallback.txt
+#
+# === COMPATIBILITY NOTES ===
+# 1. PyTorch 2.5.1 avoids the weights_only=True default in PyTorch 2.6
+# 2. This ensures all model loading works without modification
+# 3. YOLOv8 8.0.196 is compatible with PyTorch 2.5.1
+# 4. Tested with CUDA 12.1 drivers on Windows 11
+# 5. Maximum backward compatibility for existing model files

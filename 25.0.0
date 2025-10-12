@@ -1,0 +1,5 @@
+Defaulting to user installation because normal site-packages is not writeable
+Requirement already satisfied: argon2-cffi in c:\users\raham\appdata\roaming\python\python313\site-packages (25.1.0)
+Requirement already satisfied: argon2-cffi-bindings in c:\users\raham\appdata\roaming\python\python313\site-packages (from argon2-cffi) (25.1.0)
+Requirement already satisfied: cffi>=1.0.1 in c:\users\raham\appdata\roaming\python\python313\site-packages (from argon2-cffi-bindings->argon2-cffi) (2.0.0)
+Requirement already satisfied: pycparser in c:\users\raham\appdata\roaming\python\python313\site-packages (from cffi>=1.0.1->argon2-cffi-bindings->argon2-cffi) (2.23)

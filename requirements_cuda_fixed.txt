@@ -1,0 +1,37 @@
+# CUDA 12.1 + Python 3.10 Compatible Requirements
+# Fixed versions to prevent OpenCV resize errors and version conflicts
+
+# Core ML packages with CUDA 12.1 support - COMPATIBLE VERSIONS
+torch==2.1.2+cu121
+torchvision==0.16.2+cu121
+torchaudio==2.1.2+cu121
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# Stable NumPy and OpenCV versions
+numpy==1.26.4
+opencv-python==4.9.0.80
+opencv-python-headless==4.9.0.80
+
+# Additional ML dependencies
+scikit-learn==1.3.2
+scipy==1.11.4
+matplotlib==3.8.2
+pillow==10.1.0
+
+# Face detection and processing
+ultralytics==8.0.196
+mtcnn==0.1.1
+dlib==19.24.2
+
+# Video processing
+ffmpeg-python==0.2.0
+opencv-contrib-python==4.9.0.80
+
+# Utilities
+tqdm==4.66.1
+requests==2.31.0
+python-multipart==0.0.6
+
+# Optional: For advanced models
+transformers==4.35.2
+accelerate==0.24.1

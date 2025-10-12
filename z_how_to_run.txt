@@ -1,0 +1,78 @@
+cd "/mnt/e/AL FATTAH/ML AI DL/New folder/deepfake-detector"
+conda activate deepfake-env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+pkill -9 python
+
+
+venv\Scripts\activate && uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --log-level info
+
+Backend (FastAPI) - Terminal 1
+# 1. Navigate to project directory
+cd "e:\AL FATTAH\ML AI DL\New folder\deepfake-detector"
+
+# 2. Activate virtual environment
+venv\Scripts\activate
+
+# 3. Start the backend server
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# If uvicorn doesn't work, use Python directly
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+
+Frontend (React/Vite) - Terminal 2
+# 1. Navigate to frontend directory
+cd "e:\AL FATTAH\ML AI DL\New folder\deepfake-detector\frontend"
+
+# 2. Start the frontend development server
+npm run dev
+
+
+
+
+
+
+
+
+conda activate deepfake-py310 && uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --log-level info
+
+
+venv\Scripts\activate && uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --log-level info
+
+
+
+
+
+
+
+cd "/mnt/e/AL FATTAH/ML AI DL/New folder/deepfake-detector"
+
+conda activate deepfake-env && uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --log-level info
+
+
+ fuser -k 8000/tcp
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Admin Account:
+Email: admin@ifake.com
+Password: Admin123!@#
+Demo Account:
+Email: demo@ifake.com
+Password: Demo123!@#
+Test Account:
+Email: rahamanshadabur@gmail.com
+Password: Test123!@#

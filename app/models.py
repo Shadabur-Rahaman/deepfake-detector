@@ -3,13 +3,12 @@ from pydantic import BaseModel
 from typing import Optional
 
 class VideoUploadResponse(BaseModel):
-    """Response model for video upload."""
+    """Response model for a successful video upload."""
     video_id: str
     message: str
-    status: str = "received"
 
 class DetectionStatus(BaseModel):
-    """Response model for deepfake detection status."""
+    """Response model for the status of a detection task."""
     video_id: str
     status: str
     result: Optional[str] = None

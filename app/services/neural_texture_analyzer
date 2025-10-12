@@ -1,0 +1,497 @@
+# app/services/neural_texture_analyzer.py - ADVANCED TEXTURE ANALYSIS FOR AI DETECTION
+
+import cv2
+import numpy as np
+import torch
+from typing import List, Dict, Tuple
+import logging
+from scipy import signal
+from skimage import feature
+
+logger = logging.getLogger(__name__)
+
+class NeuralTextureAnalyzer:
+    """Advanced texture analysis for detecting AI-generated content"""
+    
+    def __init__(self):
+        self.texture_signatures = {
+            'natural_texture_entropy': (4.0, 7.5),
+            'natural_lbp_variance': (50.0, 200.0),
+            'natural_glcm_contrast': (0.1, 0.8)
+        }
+    
+    def analyze_texture_authenticity(self, faces: List[torch.Tensor]) -> Dict:
+        """Comprehensive texture analysis for authenticity"""
+        
+        try:
+            if not faces:
+                return {'authenticity_score': 0.5, 'artifacts': []}
+            
+            texture_results = []
+            detected_artifacts = []
+            
+            for i, face in enumerate(faces[:5]):
+                try:
+                    face_np = self._tensor_to_numpy(face)
+                    
+                    # Multiple texture analysis methods
+                    analysis = {
+                        'lbp_analysis': self._local_binary_pattern_analysis(face_np),
+                        'glcm_analysis': self._gray_level_cooccurrence_analysis(face_np),
+                        'gabor_analysis': self._gabor_filter_bank_analysis(face_np),
+                        'fractal_analysis': self._fractal_dimension_analysis(face_np),
+                        'wavelet_analysis': self._wavelet_texture_analysis(face_np)
+                    }
+                    
+                    # Aggregate face-level results
+                    face_authenticity = self._compute_face_authenticity(analysis)
+                    texture_results.append(face_authenticity)
+                    
+                    # Collect artifacts
+                    if face_authenticity['authenticity_score'] < 0.4:
+                        detected_artifacts.extend(face_authenticity['artifacts'])
+                        
+                except Exception as e:
+                    logger.warning(f"Texture analysis failed for face {i}: {e}")
+                    continue
+            
+            if texture_results:
+                overall_authenticity = np.mean([tr['authenticity_score'] for tr in texture_results])
+                confidence = self._compute_texture_confidence(texture_results)
+            else:
+                overall_authenticity = 0.5
+                confidence = 0.5
+            
+            return {
+                'authenticity_score': overall_authenticity,
+                'confidence': confidence,
+                'detected_artifacts': list(set(detected_artifacts)),
+                'faces_analyzed': len(texture_results),
+                'analysis_details': texture_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Texture analysis failed: {e}")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+    
+    def _tensor_to_numpy(self, tensor: torch.Tensor) -> np.ndarray:
+        """Convert tensor to numpy for analysis"""
+        if isinstance(tensor, torch.Tensor):
+            numpy_array = tensor.detach().cpu().numpy()
+            if len(numpy_array.shape) == 3 and numpy_array.shape[0] == 3:
+                numpy_array = np.transpose(numpy_array, (1, 2, 0))
+            if numpy_array.min() < 0:
+                mean = np.array([0.485, 0.456, 0.406])
+                std = np.array([0.229, 0.224, 0.225])
+                numpy_array = numpy_array * std + mean
+            numpy_array = np.clip(numpy_array, 0, 1)
+            numpy_array = (numpy_array * 255).astype(np.uint8)
+            return numpy_array
+        return tensor
+    
+    def _local_binary_pattern_analysis(self, face_np: np.ndarray) -> Dict:
+        """Advanced Local Binary Pattern analysis"""
+        
+        try:
+            if len(face_np.shape) == 3:
+                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = face_np
+            
+            # Multi-scale LBP analysis
+            results = {}
+            artifacts = []
+            
+            for radius in [1, 2, 3]:
+                n_points = 8 * radius
+                
+                # Calculate LBP
+                lbp = feature.local_binary_pattern(gray, n_points, radius, method='uniform')
+                
+                # Analyze LBP histogram
+                lbp_hist, _ = np.histogram(lbp.ravel(), bins=n_points + 2, 
+                                         range=(0, n_points + 2), density=True)
+                
+                # Calculate texture measures
+                entropy = -np.sum(lbp_hist * np.log(lbp_hist + 1e-10))
+                variance = np.var(lbp)
+                uniformity = np.sum(lbp_hist ** 2)
+                
+                results[f'radius_{radius}'] = {
+                    'entropy': entropy,
+                    'variance': variance,
+                    'uniformity': uniformity
+                }
+                
+                # Check for AI generation artifacts
+                if entropy < 3.0:  # Too uniform
+                    artifacts.append(f'low_lbp_entropy_r{radius}')
+                if variance < 30.0:  # Too little texture variation
+                    artifacts.append(f'low_lbp_variance_r{radius}')
+                if uniformity > 0.8:  # Too regular patterns
+                    artifacts.append(f'high_lbp_uniformity_r{radius}')
+            
+            # Multi-scale analysis
+            avg_entropy = np.mean([results[k]['entropy'] for k in results.keys()])
+            avg_variance = np.mean([results[k]['variance'] for k in results.keys()])
+            
+            # Authenticity scoring
+            if avg_entropy > 4.5 and avg_variance > 60:
+                authenticity = 0.8  # Natural texture
+            elif avg_entropy > 3.5 and avg_variance > 40:
+                authenticity = 0.6  # Moderately natural
+            else:
+                authenticity = 0.3  # Likely synthetic
+            
+            return {
+                'authenticity_score': authenticity,
+                'avg_entropy': avg_entropy,
+                'avg_variance': avg_variance,
+                'artifacts': artifacts,
+                'detailed_results': results
+            }
+            
+        except Exception as e:
+            logger.error(f"LBP analysis failed: {e}")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+    
+    def _gray_level_cooccurrence_analysis(self, face_np: np.ndarray) -> Dict:
+        """Gray-Level Co-occurrence Matrix analysis"""
+        
+        try:
+            if len(face_np.shape) == 3:
+                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = face_np
+            
+            # Normalize to 0-63 for GLCM computation efficiency
+            gray_norm = ((gray / 255.0) * 63).astype(np.uint8)
+            
+            artifacts = []
+            measures = {}
+            
+            # Calculate GLCM for different directions and distances
+            directions = [0, 45, 90, 135]  # degrees
+            distances = [1, 2]
+            
+            all_contrast = []
+            all_homogeneity = []
+            all_energy = []
+            all_correlation = []
+            
+            for distance in distances:
+                for angle in directions:
+                    # Calculate GLCM
+                    glcm = feature.greycomatrix(gray_norm, [distance], [np.radians(angle)], 
+                                              levels=64, symmetric=True, normed=True)
+                    
+                    # Calculate Haralick texture features
+                    contrast = feature.greycoprops(glcm, 'contrast')[0, 0]
+                    homogeneity = feature.greycoprops(glcm, 'homogeneity')[0, 0]
+                    energy = feature.greycoprops(glcm, 'energy')[0, 0]
+                    correlation = feature.greycoprops(glcm, 'correlation')[0, 0]
+                    
+                    all_contrast.append(contrast)
+                    all_homogeneity.append(homogeneity)
+                    all_energy.append(energy)
+                    all_correlation.append(correlation)
+            
+            # Average measures across all directions and distances
+            avg_contrast = np.mean(all_contrast)
+            avg_homogeneity = np.mean(all_homogeneity)
+            avg_energy = np.mean(all_energy)
+            avg_correlation = np.mean(all_correlation)
+            
+            measures = {
+                'contrast': avg_contrast,
+                'homogeneity': avg_homogeneity,
+                'energy': avg_energy,
+                'correlation': avg_correlation
+            }
+            
+            # Check for AI generation artifacts
+            if avg_contrast < 0.05:  # Too little contrast
+                artifacts.append('low_glcm_contrast')
+            if avg_homogeneity > 0.95:  # Too homogeneous
+                artifacts.append('high_glcm_homogeneity')
+            if avg_energy > 0.8:  # Too regular
+                artifacts.append('high_glcm_energy')
+            
+            # Authenticity scoring based on GLCM measures
+            if 0.1 < avg_contrast < 0.6 and 0.3 < avg_homogeneity < 0.9:
+                authenticity = 0.8  # Natural texture characteristics
+            elif 0.05 < avg_contrast < 0.8 and 0.2 < avg_homogeneity < 0.95:
+                authenticity = 0.6  # Moderately natural
+            else:
+                authenticity = 0.3  # Likely synthetic
+            
+            return {
+                'authenticity_score': authenticity,
+                'measures': measures,
+                'artifacts': artifacts
+            }
+            
+        except Exception as e:
+            logger.error(f"GLCM analysis failed: {e}")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+    
+    def _gabor_filter_bank_analysis(self, face_np: np.ndarray) -> Dict:
+        """Gabor filter bank analysis for texture patterns"""
+        
+        try:
+            if len(face_np.shape) == 3:
+                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = face_np
+            
+            artifacts = []
+            filter_responses = []
+            
+            # Gabor filter parameters
+            frequencies = [0.1, 0.2, 0.3, 0.4]
+            orientations = [0, 30, 60, 90, 120, 150]  # degrees
+            
+            for freq in frequencies:
+                for angle in orientations:
+                    # Create Gabor kernel
+                    kernel = cv2.getGaborKernel((21, 21), 5, np.radians(angle), 
+                                              2*np.pi*freq, 0.5, 0, ktype=cv2.CV_32F)
+                    
+                    # Apply filter
+                    filtered = cv2.filter2D(gray, cv2.CV_8UC3, kernel)
+                    
+                    # Calculate response statistics
+                    response_mean = np.mean(np.abs(filtered))
+                    response_std = np.std(filtered)
+                    response_energy = np.sum(filtered**2)
+                    
+                    filter_responses.append({
+                        'frequency': freq,
+                        'orientation': angle,
+                        'mean_response': response_mean,
+                        'std_response': response_std,
+                        'energy': response_energy
+                    })
+            
+            # Analyze filter response patterns
+            mean_responses = [fr['mean_response'] for fr in filter_responses]
+            std_responses = [fr['std_response'] for fr in filter_responses]
+            energies = [fr['energy'] for fr in filter_responses]
+            
+            # Calculate texture measures
+            response_variance = np.var(mean_responses)
+            energy_distribution = np.var(energies)
+            orientation_consistency = np.var(std_responses)
+            
+            # Check for AI generation artifacts
+            if response_variance < 2.0:  # Too uniform responses
+                artifacts.append('uniform_gabor_responses')
+            if energy_distribution < 1000:  # Too similar energy across filters
+                artifacts.append('uniform_gabor_energy')
+            if orientation_consistency < 1.0:  # Too consistent across orientations
+                artifacts.append('unnatural_orientation_consistency')
+            
+            # Authenticity scoring
+            if response_variance > 5.0 and energy_distribution > 5000:
+                authenticity = 0.8  # Natural texture variation
+            elif response_variance > 2.5 and energy_distribution > 2000:
+                authenticity = 0.6  # Moderate variation
+            else:
+                authenticity = 0.3  # Low variation (synthetic)
+            
+            return {
+                'authenticity_score': authenticity,
+                'response_variance': response_variance,
+                'energy_distribution': energy_distribution,
+                'orientation_consistency': orientation_consistency,
+                'artifacts': artifacts
+            }
+            
+        except Exception as e:
+            logger.error(f"Gabor analysis failed: {e}")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+    
+    def _fractal_dimension_analysis(self, face_np: np.ndarray) -> Dict:
+        """Fractal dimension analysis for texture complexity"""
+        
+        try:
+            if len(face_np.shape) == 3:
+                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = face_np
+            
+            # Box-counting method for fractal dimension
+            def boxcount(image, k):
+                s = np.add.reduceat(
+                    np.add.reduceat(image, np.arange(0, image.shape[0], k), axis=0),
+                    np.arange(0, image.shape[1], k), axis=1)
+                return len(np.where((s > 0) & (s < k*k))[0])
+            
+            # Calculate fractal dimension
+            p = min(gray.shape)
+            n = 2**np.floor(np.log(p)/np.log(2))
+            n = int(np.log(n)/np.log(2))
+            sizes = 2**np.arange(n, 1, -1)
+            
+            counts = []
+            for size in sizes:
+                counts.append(boxcount(gray, size))
+            
+            # Fit line to log-log plot
+            coeffs = np.polyfit(np.log(sizes), np.log(counts), 1)
+            fractal_dimension = -coeffs[0]
+            
+            artifacts = []
+            
+            # Natural textures typically have fractal dimensions between 1.2 and 1.8
+            if fractal_dimension < 1.1:
+                artifacts.append('low_fractal_dimension')
+                authenticity = 0.3  # Too smooth/simple
+            elif fractal_dimension > 1.9:
+                artifacts.append('high_fractal_dimension')  
+                authenticity = 0.4  # Too complex/noisy
+            else:
+                authenticity = 0.8  # Natural complexity
+            
+            return {
+                'authenticity_score': authenticity,
+                'fractal_dimension': fractal_dimension,
+                'artifacts': artifacts
+            }
+            
+        except Exception as e:
+            logger.error(f"Fractal analysis failed: {e}")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+    
+    def _wavelet_texture_analysis(self, face_np: np.ndarray) -> Dict:
+        """Wavelet-based texture analysis"""
+        
+        try:
+            import pywt
+            
+            if len(face_np.shape) == 3:
+                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = face_np
+            
+            artifacts = []
+            
+            # Multi-level wavelet decomposition
+            coeffs = pywt.wavedec2(gray, 'db4', levels=3)
+            
+            # Analyze coefficient statistics at each level
+            energy_ratios = []
+            for level, (cH, cV, cD) in enumerate(coeffs[1:]):
+                # Calculate energy in each orientation
+                energy_h = np.sum(cH**2)
+                energy_v = np.sum(cV**2)
+                energy_d = np.sum(cD**2)
+                total_energy = energy_h + energy_v + energy_d
+                
+                if total_energy > 0:
+                    ratio_h = energy_h / total_energy
+                    ratio_v = energy_v / total_energy
+                    ratio_d = energy_d / total_energy
+                    
+                    energy_ratios.append([ratio_h, ratio_v, ratio_d])
+                
+                # Check for unnatural patterns
+                if total_energy < 1000:  # Very low energy
+                    artifacts.append(f'low_wavelet_energy_level_{level}')
+                
+                # Check coefficient distribution
+                combined_coeffs = np.concatenate([cH.flatten(), cV.flatten(), cD.flatten()])
+                coeff_std = np.std(combined_coeffs)
+                
+                if coeff_std < 0.5:  # Too uniform coefficients
+                    artifacts.append(f'uniform_wavelet_coeffs_level_{level}')
+            
+            # Analyze energy distribution across levels
+            if energy_ratios:
+                energy_ratios = np.array(energy_ratios)
+                
+                # Natural textures have specific energy distribution patterns
+                level_variance = np.var(energy_ratios, axis=0)
+                orientation_balance = np.mean(np.std(energy_ratios, axis=1))
+                
+                if np.all(level_variance < 0.01):  # Too uniform across levels
+                    artifacts.append('uniform_wavelet_energy_distribution')
+                    authenticity = 0.3
+                elif orientation_balance < 0.05:  # Too balanced orientations
+                    artifacts.append('artificial_orientation_balance')
+                    authenticity = 0.4
+                else:
+                    authenticity = 0.7  # Natural energy distribution
+            else:
+                authenticity = 0.5
+            
+            return {
+                'authenticity_score': authenticity,
+                'artifacts': artifacts
+            }
+            
+        except ImportError:
+            logger.warning("PyWavelets not available for wavelet analysis")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+        except Exception as e:
+            logger.error(f"Wavelet analysis failed: {e}")
+            return {'authenticity_score': 0.5, 'artifacts': []}
+    
+    def _compute_face_authenticity(self, analysis_results: Dict) -> Dict:
+        """Compute overall authenticity score for a single face"""
+        
+        # Weights for different texture analysis methods
+        weights = {
+            'lbp_analysis': 0.25,
+            'glcm_analysis': 0.25,
+            'gabor_analysis': 0.20,
+            'fractal_analysis': 0.15,
+            'wavelet_analysis': 0.15
+        }
+        
+        total_score = 0.0
+        total_weight = 0.0
+        all_artifacts = []
+        
+        for method, result in analysis_results.items():
+            if method in weights and isinstance(result, dict):
+                score = result.get('authenticity_score', 0.5)
+                artifacts = result.get('artifacts', [])
+                
+                total_score += score * weights[method]
+                total_weight += weights[method]
+                all_artifacts.extend(artifacts)
+        
+        if total_weight > 0:
+            final_score = total_score / total_weight
+        else:
+            final_score = 0.5
+        
+        return {
+            'authenticity_score': final_score,
+            'artifacts': all_artifacts,
+            'analysis_breakdown': analysis_results
+        }
+    
+    def _compute_texture_confidence(self, texture_results: List[Dict]) -> float:
+        """Compute confidence in texture analysis results"""
+        
+        if not texture_results:
+            return 0.5
+        
+        scores = [tr['authenticity_score'] for tr in texture_results]
+        
+        # High confidence if scores are consistent and not near 0.5
+        score_variance = np.var(scores)
+        avg_score = np.mean(scores)
+        
+        # Distance from uncertainty (0.5)
+        uncertainty_distance = abs(avg_score - 0.5)
+        
+        # Confidence based on consistency and certainty
+        confidence = (1 - score_variance) * uncertainty_distance * 2
+        
+        return max(0.1, min(confidence, 1.0))
+
+# Global instance
+neural_texture_analyzer = NeuralTextureAnalyzer()
