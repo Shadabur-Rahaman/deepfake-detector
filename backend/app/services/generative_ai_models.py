@@ -137,7 +137,21 @@ class TransformerAnalyzer:
         try:
             if not isinstance(face, np.ndarray) or face.size == 0:
                 return np.array([0.0, 0.0, 0.0])
+            
+            # FIX: Ensure proper data type conversion for OpenCV
+            if face.dtype != np.uint8:
+                if face.max() <= 1.0:
+                    face = (face * 255).astype(np.uint8)
+                else:
+                    face = np.clip(face, 0, 255).astype(np.uint8)
                 
+            # FIX: Ensure proper data type conversion for OpenCV
+            if face.dtype != np.uint8:
+                if face.max() <= 1.0:
+                    face = (face * 255).astype(np.uint8)
+                else:
+                    face = np.clip(face, 0, 255).astype(np.uint8)
+                    
             if len(face.shape) == 3:
                 gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
             else:
@@ -210,6 +224,19 @@ class TransformerAnalyzer:
                 
             if prev_face.size == 0 or curr_face.size == 0:
                 return np.array([0.1, 0.1])
+            
+            # FIX: Ensure proper data type conversion for OpenCV
+            if prev_face.dtype != np.uint8:
+                if prev_face.max() <= 1.0:
+                    prev_face = (prev_face * 255).astype(np.uint8)
+                else:
+                    prev_face = np.clip(prev_face, 0, 255).astype(np.uint8)
+                    
+            if curr_face.dtype != np.uint8:
+                if curr_face.max() <= 1.0:
+                    curr_face = (curr_face * 255).astype(np.uint8)
+                else:
+                    curr_face = np.clip(curr_face, 0, 255).astype(np.uint8)
             
             # Convert to grayscale if needed
             if len(prev_face.shape) == 3:
@@ -355,19 +382,21 @@ class TransformerAnalyzer:
             feature_std = np.std(feature_array)
             feature_variance = np.var(feature_array)
             
-            # Generate prediction based on feature characteristics
-            if feature_variance > 0.5:  # High variance might indicate manipulation
+            # Generate prediction based on feature characteristics (very conservative)
+            # Default to Real Video unless there's very strong evidence of manipulation
+            if feature_variance > 0.9:  # Extremely high variance might indicate manipulation
                 prediction = "Deepfake Detected"
-                confidence = min(0.9, feature_variance)
-            elif feature_std > 0.3:  # High standard deviation
+                confidence = min(0.6, feature_variance * 0.5)  # Much reduced confidence
+            elif feature_std > 0.8:  # Extremely high standard deviation
                 prediction = "Deepfake Detected"
-                confidence = min(0.8, feature_std)
-            elif feature_mean > 0.7:  # High mean might indicate artifacts
+                confidence = min(0.5, feature_std * 0.4)  # Much reduced confidence
+            elif feature_mean > 0.95:  # Extremely high mean might indicate artifacts
                 prediction = "Deepfake Detected"
-                confidence = min(0.7, feature_mean)
+                confidence = min(0.4, feature_mean * 0.3)  # Much reduced confidence
             else:
+                # Default to Real Video with reasonable confidence
                 prediction = "Real Video"
-                confidence = min(0.9, max(0.1, 1.0 - feature_variance))
+                confidence = min(0.7, max(0.4, 0.6 - feature_variance * 0.1))  # Conservative for real videos
             
             return prediction, float(confidence)
             
@@ -552,6 +581,13 @@ class GANAnalyzer:
             if not isinstance(face, np.ndarray) or face.size == 0:
                 return np.array([0.1] * 12)  # Return small non-zero values
                 
+            # FIX: Ensure proper data type conversion for OpenCV
+            if face.dtype != np.uint8:
+                if face.max() <= 1.0:
+                    face = (face * 255).astype(np.uint8)
+                else:
+                    face = np.clip(face, 0, 255).astype(np.uint8)
+                    
             if len(face.shape) == 3:
                 gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
             else:
@@ -615,6 +651,19 @@ class GANAnalyzer:
     def _calculate_structural_similarity(self, face1: np.ndarray, face2: np.ndarray) -> float:
         """Calculate structural similarity between two faces"""
         try:
+            # FIX: Ensure proper data type conversion for OpenCV
+            if face1.dtype != np.uint8:
+                if face1.max() <= 1.0:
+                    face1 = (face1 * 255).astype(np.uint8)
+                else:
+                    face1 = np.clip(face1, 0, 255).astype(np.uint8)
+                    
+            if face2.dtype != np.uint8:
+                if face2.max() <= 1.0:
+                    face2 = (face2 * 255).astype(np.uint8)
+                else:
+                    face2 = np.clip(face2, 0, 255).astype(np.uint8)
+            
             # Convert to grayscale if needed
             if len(face1.shape) == 3:
                 gray1 = cv2.cvtColor(face1, cv2.COLOR_BGR2GRAY)
@@ -664,22 +713,24 @@ class GANAnalyzer:
             realism_score = generation_patterns.get("realism_score", 0.5)
             artifact_score = generation_patterns.get("artifact_score", 0.5)
             
-            # Generate prediction
-            if avg_discrimination < 0.3:  # Low discrimination = likely synthetic
+            # Generate prediction (very conservative - default to Real Video)
+            # Only classify as Deepfake with very strong evidence
+            if avg_discrimination < 0.1:  # Extremely low discrimination = likely synthetic
                 prediction = "Deepfake Detected"
-                confidence = min(0.9, 1.0 - avg_discrimination)
-            elif artifact_score > 0.7:  # High artifacts = likely manipulated
+                confidence = min(0.5, (1.0 - avg_discrimination) * 0.4)  # Much reduced confidence
+            elif artifact_score > 0.9:  # Extremely high artifacts = likely manipulated
                 prediction = "Deepfake Detected"
-                confidence = min(0.8, artifact_score)
-            elif consistency_score < 0.3:  # Low consistency = likely manipulated
+                confidence = min(0.4, artifact_score * 0.3)  # Much reduced confidence
+            elif consistency_score < 0.1:  # Extremely low consistency = likely manipulated
                 prediction = "Deepfake Detected"
-                confidence = min(0.7, 1.0 - consistency_score)
-            elif discrimination_variance > 0.2:  # High variance in discrimination
+                confidence = min(0.3, (1.0 - consistency_score) * 0.3)  # Much reduced confidence
+            elif discrimination_variance > 0.6:  # Extremely high variance in discrimination
                 prediction = "Deepfake Detected"
-                confidence = min(0.6, discrimination_variance)
+                confidence = min(0.3, discrimination_variance * 0.3)  # Much reduced confidence
             else:
+                # Default to Real Video with reasonable confidence
                 prediction = "Real Video"
-                confidence = min(0.9, max(0.1, avg_discrimination))
+                confidence = min(0.7, max(0.5, avg_discrimination * 0.6))  # Conservative for real videos
             
             return prediction, float(confidence)
             
@@ -722,18 +773,20 @@ class GenerativeAIModels:
         """Get optimal device for GPU acceleration"""
         try:
             # Use CUDA Safety Manager if available
-            from services.cuda_safety_manager import get_safe_device
+            from backend.app.services.cuda_safety_manager import get_safe_device
             return get_safe_device()
         except ImportError:
             # Fallback device detection
             try:
                 import torch
                 if torch.cuda.is_available():
-                    # Test CUDA with small operation
-                    test_tensor = torch.tensor([1.0]).cuda()
-                    del test_tensor
-                    torch.cuda.empty_cache()
-                    return "cuda"
+                    # Use centralized CUDA safety manager to avoid driver conflicts
+                    from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                    
+                    if is_cuda_available_global():
+                        return get_validated_device()
+                    else:
+                        return "cpu"
             except Exception:
                 pass
             return "cpu"
@@ -841,16 +894,20 @@ class GenerativeAIModels:
                 else:
                     real_votes += weighted_conf
             
-            # Determine final prediction
+            # Determine final prediction with very conservative scoring
             if total_weight == 0:
                 final_prediction = "No Consensus"
                 final_confidence = 0.0
             elif deepfake_votes > real_votes:
                 final_prediction = "Deepfake Detected"
-                final_confidence = deepfake_votes / total_weight
+                # Heavily cap confidence to prevent false positives
+                raw_confidence = deepfake_votes / total_weight
+                final_confidence = min(0.6, raw_confidence * 0.6)  # Much reduced confidence for deepfake predictions
             else:
                 final_prediction = "Real Video"
-                final_confidence = real_votes / total_weight
+                # Ensure real video predictions have good confidence
+                raw_confidence = real_votes / total_weight
+                final_confidence = min(0.8, max(0.5, raw_confidence * 0.8))  # Good confidence for real videos
             
             ensemble_output = ModelOutput(
                 model_type=ModelType.MULTIMODAL,

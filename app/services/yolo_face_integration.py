@@ -18,5 +18,5 @@ class UltraFaceExtractor:
             logger.warning(f"⚠️ YOLOv8 fallback to MTCNN: {e}")
             
         # Fallback to existing system
-        from backend.app.services.video_processor import extract_faces_from_video
-        return extract_faces_from_video(video_path, frames_to_process=20)
+        from app.services.video_processor import extract_faces_from_video
+        return await extract_faces_from_video(video_path, frames_to_process=20)

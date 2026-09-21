@@ -22,6 +22,14 @@ import cv2
 from typing import List, Dict, Tuple, Optional, Any
 import warnings
 
+# Import face data validator for type conversion
+try:
+    from .face_data_validator import FaceDataValidator
+    FACE_VALIDATOR_AVAILABLE = True
+except ImportError:
+    FACE_VALIDATOR_AVAILABLE = False
+    logger.warning("FaceDataValidator not available")
+
 logger = logging.getLogger(__name__)
 
 # YOLOv8 availability check
@@ -39,16 +47,19 @@ class YOLOv8DeepfakeDetector:
     def __init__(self, device: str = "cuda:0"):
         # Use optimal device selection with GPU preference
         try:
-            from services.cuda_safety_manager import get_safe_device
+            from backend.app.services.cuda_safety_manager import get_safe_device
             self.device = get_safe_device()
         except ImportError:
             # Fallback to GPU if available
             if torch.cuda.is_available():
                 try:
-                    test_tensor = torch.tensor([1.0]).cuda()
-                    del test_tensor
-                    torch.cuda.empty_cache()
-                    self.device = "cuda"
+                    # Use centralized CUDA safety manager to avoid driver conflicts
+                    from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                    
+                    if is_cuda_available_global():
+                        self.device = get_validated_device()
+                    else:
+                        self.device = "cpu"
                 except Exception:
                     self.device = "cpu"
             else:
@@ -65,32 +76,100 @@ class YOLOv8DeepfakeDetector:
             logger.warning("YOLOv8 not available, YOLOv8 deepfake detector disabled")
     
     def _initialize_models(self):
-        """Initialize YOLOv8 models with GPU optimization"""
+        """Initialize YOLOv8 models with GPU optimization and OOM handling"""
         try:
             logger.info("🔧 Initializing YOLOv8 models with optimal device...")
             
+            # ✅ CRITICAL FIX: Clear CUDA cache and check memory before loading
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                allocated = torch.cuda.memory_allocated() / (1024**3)
+                total_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                free_memory = total_memory - allocated
+                
+                # If less than 500MB free, force CPU
+                if free_memory < 0.5:
+                    logger.warning(f"⚠️ GPU memory low ({free_memory:.2f}GB free), using CPU for YOLOv8")
+                    self.device = "cpu"
+            
             try:
-                # Load YOLOv8 face detection model
-                self.face_model = YOLO('yolov8n-face.pt')
-                # Move to optimal device
-                self.face_model.to(self.device)
-                logger.info(f"✅ YOLOv8 face model loaded for deepfake detection on {self.device}")
+                # Try to load YOLOv8 face detection model, fallback to general model
+                try:
+                    self.face_model = YOLO('yolov8n-face.pt')
+                    # ✅ CRITICAL FIX: Try target device, fallback to CPU on OOM
+                    try:
+                        if self.device != "cpu":
+                            self.face_model.to(self.device)
+                            logger.info(f"✅ YOLOv8 face model loaded on {self.device} (FP32)")
+                        else:
+                            self.face_model.to("cpu")
+                            logger.info(f"✅ YOLOv8 face model loaded on CPU")
+                    except RuntimeError as oom_error:
+                        if "CUDA" in str(oom_error) or "memory" in str(oom_error).lower():
+                            logger.warning(f"⚠️ CUDA OOM loading YOLOv8 face model: {oom_error}")
+                            logger.warning("⚠️ Falling back to CPU for YOLOv8")
+                            self.device = "cpu"
+                            torch.cuda.empty_cache()
+                            self.face_model.to("cpu")
+                            logger.info(f"✅ YOLOv8 face model loaded on CPU (fallback)")
+                        else:
+                            raise oom_error
+                except Exception as face_model_error:
+                    logger.warning(f"⚠️ YOLOv8 face model not available: {face_model_error}")
+                    logger.info("🔄 Using general YOLOv8 model as fallback for face detection")
+                    try:
+                        self.face_model = YOLO('yolov8n.pt')  # Use general model as fallback
+                        # Try target device, fallback to CPU
+                        try:
+                            if self.device != "cpu":
+                                self.face_model.to(self.device)
+                                logger.info(f"✅ YOLOv8 general model loaded as fallback on {self.device}")
+                            else:
+                                self.face_model.to("cpu")
+                                logger.info(f"✅ YOLOv8 general model loaded as fallback on CPU")
+                        except RuntimeError as oom_error:
+                            if "CUDA" in str(oom_error) or "memory" in str(oom_error).lower():
+                                logger.warning(f"⚠️ CUDA OOM loading YOLOv8 fallback: {oom_error}")
+                                self.device = "cpu"
+                                torch.cuda.empty_cache()
+                                self.face_model.to("cpu")
+                                logger.info(f"✅ YOLOv8 general model loaded on CPU (fallback)")
+                            else:
+                                raise oom_error
+                    except Exception as fallback_error:
+                        logger.error(f"❌ Failed to load YOLOv8 fallback model: {fallback_error}")
+                        self.face_model = None
             except Exception as face_model_error:
-                logger.error(f"❌ Failed to load YOLOv8 face model: {face_model_error}")
+                logger.error(f"❌ Failed to load YOLOv8 models: {face_model_error}")
                 self.face_model = None
             
             # Try to load a general YOLOv8 model for object detection
             try:
                 self.yolo_model = YOLO('yolov8n.pt')  # General YOLOv8 model
-                # Move to optimal device
-                self.yolo_model.to(self.device)
-                logger.info(f"✅ YOLOv8 general model loaded for artifact detection on {self.device}")
+                # ✅ CRITICAL FIX: Try target device, fallback to CPU on OOM
+                try:
+                    if self.device != "cpu":
+                        self.yolo_model.to(self.device)
+                        logger.info(f"✅ YOLOv8 general model loaded on {self.device} (FP32)")
+                    else:
+                        self.yolo_model.to("cpu")
+                        logger.info(f"✅ YOLOv8 general model loaded on CPU")
+                except RuntimeError as oom_error:
+                    if "CUDA" in str(oom_error) or "memory" in str(oom_error).lower():
+                        logger.warning(f"⚠️ CUDA OOM loading YOLOv8 general model: {oom_error}")
+                        self.device = "cpu"
+                        torch.cuda.empty_cache()
+                        self.yolo_model.to("cpu")
+                        logger.info(f"✅ YOLOv8 general model loaded on CPU (fallback)")
+                    else:
+                        raise oom_error
             except Exception as general_model_error:
                 logger.warning(f"⚠️ Could not load general YOLOv8 model: {general_model_error}")
                 self.yolo_model = None
             
-            # Test models if loaded
-            if self.face_model:
+            # Test models if loaded (skip if on CPU to save time)
+            if self.face_model and self.device != "cpu":
                 try:
                     # Test face model with dummy image
                     test_img = np.zeros((224, 224, 3), dtype=np.uint8)
@@ -105,6 +184,9 @@ class YOLOv8DeepfakeDetector:
         except Exception as e:
             logger.error(f"❌ Failed to initialize YOLOv8 models: {e}")
             self.models_loaded = False
+            # Clear cache on failure
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     def detect_deepfake_features(self, faces: List[np.ndarray]) -> Dict[str, Any]:
         """
@@ -122,9 +204,28 @@ class YOLOv8DeepfakeDetector:
         try:
             logger.info(f"🔍 YOLOv8 analyzing {len(faces)} faces for deepfake features")
             
+            # FIXED: Validate and convert all faces using FaceDataValidator
+            validated_faces = []
+            if FACE_VALIDATOR_AVAILABLE:
+                validated_faces = FaceDataValidator.validate_face_list(faces, "yolov8_detector")
+            else:
+                # Fallback: manual validation
+                for i, face in enumerate(faces):
+                    try:
+                        if isinstance(face, np.ndarray):
+                            validated_faces.append(face)
+                        else:
+                            logger.warning(f"Face {i} is not numpy array: {type(face)}")
+                    except Exception as e:
+                        logger.warning(f"Face {i} validation failed: {e}")
+            
+            if not validated_faces:
+                logger.warning("No valid faces found for YOLOv8 analysis")
+                return self._create_fallback_result()
+            
             # Convert all faces to numpy arrays first
             numpy_faces = []
-            for face in faces:
+            for face in validated_faces:
                 try:
                     numpy_face = self._convert_face_to_numpy(face)
                     numpy_faces.append(numpy_face)
@@ -196,7 +297,9 @@ class YOLOv8DeepfakeDetector:
             return result
             
         except Exception as e:
+            import traceback
             logger.error(f"YOLOv8 deepfake detection failed: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             return self._create_fallback_result()
     
     def _extract_yolo_features(self, face: np.ndarray) -> Dict[str, Any]:
@@ -208,36 +311,36 @@ class YOLOv8DeepfakeDetector:
             if face.dtype != np.uint8:
                 face = np.clip(face, 0, 255).astype(np.uint8)
             
-                # Run YOLOv8 face detection to get features
-                if self.face_model:
-                    try:
-                        # Use optimal device
-                        results = self.face_model(face, verbose=False, device=self.device)
-                        
-                        features = {
-                            'detections': [],
-                            'confidence_scores': [],
-                            'bounding_boxes': [],
-                            'feature_maps': []
-                        }
-                        
-                        for result in results:
-                            if result.boxes is not None:
-                                boxes = result.boxes.xyxy.cpu().numpy()
-                                confidences = result.boxes.conf.cpu().numpy()
-                                
-                                features['detections'].append(len(boxes))
-                                features['confidence_scores'].extend(confidences.tolist())
-                                features['bounding_boxes'].extend(boxes.tolist())
-                                
-                                # Extract feature maps if available
-                                if hasattr(result, 'features') and result.features is not None:
-                                    features['feature_maps'].append(result.features)
-                        
-                        return features
-                    except Exception as device_error:
-                        logger.warning(f"YOLOv8 inference failed: {device_error}, using fallback")
-                        return {'detections': [], 'confidence_scores': [], 'bounding_boxes': [], 'feature_maps': []}
+            # Run YOLOv8 face detection to get features
+            if self.face_model:
+                try:
+                    # Use optimal device
+                    results = self.face_model(face, verbose=False, device=self.device)
+                    
+                    features = {
+                        'detections': [],
+                        'confidence_scores': [],
+                        'bounding_boxes': [],
+                        'feature_maps': []
+                    }
+                    
+                    for result in results:
+                        if result.boxes is not None:
+                            boxes = result.boxes.xyxy.cpu().numpy()
+                            confidences = result.boxes.conf.cpu().numpy()
+                            
+                            features['detections'].append(int(len(boxes)))
+                            features['confidence_scores'].extend(confidences.tolist())
+                            features['bounding_boxes'].extend(boxes.tolist())
+                            
+                            # Extract feature maps if available
+                            if hasattr(result, 'features') and result.features is not None:
+                                features['feature_maps'].append(result.features)
+                    
+                    return features
+                except Exception as device_error:
+                    logger.warning(f"YOLOv8 inference failed: {device_error}, using fallback")
+                    return {'detections': [], 'confidence_scores': [], 'bounding_boxes': [], 'feature_maps': []}
             else:
                 return {'detections': [], 'confidence_scores': [], 'bounding_boxes': [], 'feature_maps': []}
                 
@@ -258,23 +361,32 @@ class YOLOv8DeepfakeDetector:
             confidence_scores = features.get('confidence_scores', [])
             if confidence_scores:
                 # High variance in confidence scores might indicate artifacts
-                confidence_variance = np.var(confidence_scores)
-                if confidence_variance > 0.1:  # High variance
-                    artifact_score += 0.2
-                elif confidence_variance < 0.01:  # Very low variance (suspicious uniformity)
-                    artifact_score += 0.15
+                try:
+                    confidence_variance = float(np.var(confidence_scores))
+                    if confidence_variance > 0.1:  # High variance
+                        artifact_score += 0.2
+                    elif confidence_variance < 0.01:  # Very low variance (suspicious uniformity)
+                        artifact_score += 0.15
+                except Exception as e:
+                    logger.warning(f"Confidence variance calculation failed: {e}")
+                    # Skip this analysis if variance calculation fails
             
             # Analyze bounding box patterns
             bounding_boxes = features.get('bounding_boxes', [])
-            if len(bounding_boxes) > 1:
-                # Multiple detections might indicate artifacts
-                artifact_score += 0.1
+            try:
+                num_boxes = len(bounding_boxes) if isinstance(bounding_boxes, (list, tuple, np.ndarray)) else 0
+                if num_boxes > 1:
+                    # Multiple detections might indicate artifacts
+                    artifact_score += 0.1
+            except Exception as e:
+                logger.warning(f"Bounding box analysis failed: {e}, type: {type(bounding_boxes)}")
             
             # Analyze face quality using OpenCV
             gray = cv2.cvtColor(face, cv2.COLOR_RGB2GRAY) if len(face.shape) == 3 else face
             
             # Laplacian variance (sharpness)
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+            laplacian_var = float(np.var(laplacian))
             if laplacian_var < 100:  # Very blurry
                 artifact_score += 0.2
             elif laplacian_var > 1000:  # Very sharp (might be artificial)
@@ -359,7 +471,7 @@ class YOLOv8DeepfakeDetector:
                 if len(face_np.shape) == 3 and face_np.shape[0] == 3:
                     face_np = np.transpose(face_np, (1, 2, 0))
                 # Denormalize if normalized
-                if face_np.max() <= 1.0:
+                if float(face_np.max()) <= 1.0:
                     face_np = (face_np * 255).astype(np.uint8)
                 # Ensure uint8 dtype
                 if face_np.dtype != np.uint8:

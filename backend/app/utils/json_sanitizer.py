@@ -45,8 +45,8 @@ def sanitize_float(value: Union[float, int, np.number]) -> float:
                 logger.warning(f"Negative infinity detected and replaced with 0.0: {value}")
                 return 0.0
         else:
-            # Clamp to reasonable range for confidence values
-            return max(0.0, min(1.0, float_value))
+            # Return the value as-is (don't clamp all floats to [0,1])
+            return float_value
             
     except (ValueError, TypeError) as e:
         logger.warning(f"Invalid float value detected and replaced with 0.0: {value}, error: {e}")
@@ -97,19 +97,35 @@ def sanitize_detection_result(result: Dict[str, Any]) -> Dict[str, Any]:
         
         # Ensure critical fields are present and valid
         if isinstance(sanitized, dict):
-            # Ensure confidence is a valid float
+            # Ensure confidence is a valid float (clamp to [0,1] for confidence only)
             if 'confidence' in sanitized:
-                sanitized['confidence'] = sanitize_float(sanitized['confidence'])
+                conf = sanitized['confidence']
+                if isinstance(conf, (int, float, np.number)):
+                    conf_float = float(conf)
+                    if math.isnan(conf_float) or math.isinf(conf_float):
+                        sanitized['confidence'] = 0.0
+                    else:
+                        sanitized['confidence'] = max(0.0, min(1.0, conf_float))
             
-            # Ensure processing_time is valid
+            # Ensure processing_time is valid (don't clamp to [0,1])
             if 'processing_time' in sanitized:
-                sanitized['processing_time'] = sanitize_float(sanitized['processing_time'])
+                time_val = sanitized['processing_time']
+                if isinstance(time_val, (int, float, np.number)):
+                    time_float = float(time_val)
+                    if math.isnan(time_float) or math.isinf(time_float):
+                        sanitized['processing_time'] = 0.0
+                    else:
+                        sanitized['processing_time'] = max(0.0, time_float)  # Only ensure non-negative
             
-            # Ensure faces_detected is valid
+            # Ensure faces_detected is valid (don't clamp to [0,1])
             if 'faces_detected' in sanitized:
                 faces = sanitized['faces_detected']
                 if isinstance(faces, (int, float, np.number)):
-                    sanitized['faces_detected'] = max(0, int(sanitize_float(faces)))
+                    faces_float = float(faces)
+                    if math.isnan(faces_float) or math.isinf(faces_float):
+                        sanitized['faces_detected'] = 0
+                    else:
+                        sanitized['faces_detected'] = max(0, int(faces_float))  # Only ensure non-negative
             
             # Sanitize nested structures
             for key in ['ai_analysis', 'ensemble_score', 'final_composite_score']:

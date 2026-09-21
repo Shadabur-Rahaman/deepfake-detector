@@ -700,7 +700,7 @@ class TrueEnsembleDetector:
         try:
             converted_faces = self._convert_faces_to_tensors(faces)
             if converted_faces:
-                from backend.app.services.deepfake_detector import detect_deepfake_sync
+                from app.services.deepfake_detector import detect_deepfake_sync
                 return detect_deepfake_sync(converted_faces[:5])
             else:
                 return "Real Video", 0.6

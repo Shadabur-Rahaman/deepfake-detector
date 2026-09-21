@@ -1,29 +1,28 @@
-# deepfake-detector/Dockerfile
+# syntax=docker/dockerfile:1
+FROM python:3.11-slim
 
-# Use a lightweight Python base image
-FROM python:3.9-slim-buster
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
-# ✅ Install system-level dependencies for OpenCV
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
-
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy only the requirements file first to leverage Docker cache
 COPY requirements.txt .
-
-# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire application code
-COPY . .
+COPY backend ./backend
+COPY app ./app
+COPY ml_artifacts ./ml_artifacts
+COPY advanced_models ./advanced_models
+COPY config.env.example ./config.env
 
-# Ensure the upload folder exists
-ENV UPLOAD_DIR="uploaded_videos"
-RUN mkdir -p ${UPLOAD_DIR}
+ENV FORCE_CPU_MODE=1
+ENV PYTHONUNBUFFERED=1
+ENV HOST=0.0.0.0
+ENV PORT=8000
 
-# Expose the port for FastAPI
 EXPOSE 8000
 
-# Start the FastAPI app with uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

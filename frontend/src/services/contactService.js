@@ -3,11 +3,14 @@
  * Handles contact form submissions and integrates with admin dashboard
  */
 
+import mockBackend from './mockBackend';
+
 class ContactService {
   constructor() {
     this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
     this.websocket = null;
     this.listeners = new Map();
+    this.useMockBackend = process.env.NODE_ENV === 'development' || !process.env.REACT_APP_API_URL;
   }
 
   // Event System
@@ -66,16 +69,25 @@ class ContactService {
       // Validate form data
       this.validateContactForm(formData);
 
-      // Submit to backend
-      const response = await this.makeRequest('/contact/submit', {
-        method: 'POST',
-        body: JSON.stringify({
+      let response;
+      if (this.useMockBackend) {
+        response = await mockBackend.submitContactRequest({
           ...formData,
           timestamp: new Date().toISOString(),
           userAgent: navigator.userAgent,
           ip: await this.getClientIP()
-        })
-      });
+        });
+      } else {
+        response = await this.makeRequest('/contact/submit', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...formData,
+            timestamp: new Date().toISOString(),
+            userAgent: navigator.userAgent,
+            ip: await this.getClientIP()
+          })
+        });
+      }
 
       // Emit success event
       this.emit('contact_submitted', {

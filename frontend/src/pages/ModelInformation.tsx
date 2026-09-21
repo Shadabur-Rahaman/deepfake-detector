@@ -30,7 +30,8 @@ import {
   BookOpen,
   Download,
   Github,
-  GitBranch
+  GitBranch,
+  CheckCircle2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 

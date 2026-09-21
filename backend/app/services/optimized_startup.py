@@ -459,7 +459,7 @@ class OptimizedStartup:
                 from torchvision import models
                 import torch.nn as nn
                 
-                model = models.efficientnet_b0(weights='IMAGENET1K_V1')
+                model = models.efficientnet_b0(weights=None)
                 num_ftrs = model.classifier[1].in_features
                 model.classifier[1] = nn.Linear(num_ftrs, 1)
                 model.eval()

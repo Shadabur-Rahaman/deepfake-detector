@@ -575,7 +575,7 @@ const Contact: React.FC = () => {
                       {member.initials}
                     </div>
                     <CardTitle className="text-lg neural-text">{member.name}</CardTitle>
-                    <Badge variant={member.isLead ? "default" : "secondary"} className="neural-card mx-auto">
+                    <Badge variant={member.isLead ? "default" : "secondary"} className={`mx-auto ${member.isLead ? "bg-primary text-primary-foreground" : "neural-card"}`}>
                       {member.role}
                     </Badge>
                   </CardHeader>

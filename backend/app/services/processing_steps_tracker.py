@@ -22,8 +22,27 @@ from dataclasses import dataclass, field
 from enum import Enum
 import asyncio
 from datetime import datetime
+import numpy as np
+import math
 
 logger = logging.getLogger(__name__)
+
+def sanitize_value(value):
+    """Sanitize numpy types to Python native types for JSON serialization"""
+    if isinstance(value, (np.floating, np.float32, np.float64, np.float16)):
+        float_val = float(value.item() if hasattr(value, 'item') else value)
+        if math.isnan(float_val) or math.isinf(float_val):
+            return 0.0
+        return float_val
+    elif isinstance(value, (np.integer, np.int32, np.int64, np.int16, np.int8, np.uint8, np.uint16, np.uint32, np.uint64)):
+        return int(value.item() if hasattr(value, 'item') else value)
+    elif isinstance(value, dict):
+        return {k: sanitize_value(v) for k, v in value.items()}
+    elif isinstance(value, (list, tuple)):
+        return [sanitize_value(item) for item in value]
+    elif isinstance(value, np.ndarray):
+        return sanitize_value(value.tolist())
+    return value
 
 class StepStatus(Enum):
     """Status of processing steps"""
@@ -70,7 +89,9 @@ class ProcessingStep:
         """Update step progress"""
         self.progress_percentage = min(100.0, max(0.0, percentage))
         if details:
-            self.details.update(details)
+            # Sanitize all values before storing
+            sanitized_details = sanitize_value(details)
+            self.details.update(sanitized_details)
 
     def complete(self, details: Optional[Dict[str, Any]] = None):
         """Mark step as completed"""
@@ -80,7 +101,9 @@ class ProcessingStep:
             self.duration = self.end_time - self.start_time
         self.progress_percentage = 100.0
         if details:
-            self.details.update(details)
+            # Sanitize all values before storing
+            sanitized_details = sanitize_value(details)
+            self.details.update(sanitized_details)
 
     def fail(self, error_message: str):
         """Mark step as failed"""

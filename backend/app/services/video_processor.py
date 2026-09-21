@@ -19,6 +19,10 @@ try:
     cv2 = import_cache['cv2']
     np = import_cache['numpy']
     
+    # Fallback direct imports if cache fails
+    if np is None:
+        import numpy as np
+    
     print("[OK] LooseVersion compatibility fix applied in video_processor")
     
 except ImportError:
@@ -26,7 +30,7 @@ except ImportError:
     import cv2
     import numpy as np
     import torch
-    print("[WARNING] Using fallback imports in video_processor")
+    print("[INFO] Using fallback imports in video_processor")
 
 # Try to import scikit-image for advanced texture analysis
 try:
@@ -35,6 +39,14 @@ try:
 except ImportError:
     SKIMAGE_AVAILABLE = False
     print("[WARNING] scikit-image not available. Install with: pip install scikit-image")
+
+# Import face data validator for type conversion
+try:
+    from .face_data_validator import FaceDataValidator
+    FACE_VALIDATOR_AVAILABLE = True
+except ImportError:
+    FACE_VALIDATOR_AVAILABLE = False
+    print("[WARNING] FaceDataValidator not available")
 
 # Monkey patch PyTorch warnings (with improved error handling)
 try:
@@ -285,19 +297,19 @@ globals()['to_thread'] = to_thread
 # Also make it available as a module-level function
 __all__ = ['extract_faces_from_video', 'to_thread']
 
-# **FIXED** - Global MTCNN availability check with enhanced error handling
-MTCNN_AVAILABLE = False
+# **ENABLED** - MTCNN enabled for better face detection
 try:
-    # Try to import MTCNN directly without relying on pkg_resources
-    from mtcnn.mtcnn import MTCNN
-    MTCNN_AVAILABLE = True
-    print("[OK] MTCNN available for face detection")
-except ImportError:
-    # Suppress MTCNN warning completely
-    MTCNN_AVAILABLE = False
+    from services.mtcnn_python313_fix import MTCNN_Python313_Fix
+    MTCNN_DETECTOR = MTCNN_Python313_Fix()
+    MTCNN_AVAILABLE = MTCNN_DETECTOR.available if MTCNN_DETECTOR else False
+    if MTCNN_AVAILABLE:
+        print("✅ MTCNN enabled for face detection")
+    else:
+        print("⚠️ MTCNN not available - using YOLOv8 and OpenCV fallbacks")
 except Exception as e:
-    # Suppress MTCNN error messages completely
     MTCNN_AVAILABLE = False
+    MTCNN_DETECTOR = None
+    print(f"⚠️ MTCNN failed to load: {e} - using YOLOv8 and OpenCV fallbacks")
 
 # Enhanced YOLO availability check using centralized import management
 try:
@@ -434,74 +446,138 @@ class FaceExtractor:
         self._yolo_failure_count = 0
         self._max_yolo_failures = 3  # Disable YOLO after 3 consecutive failures
 
-        # YOLOv8 (face) - Try to download if not exists
+        # YOLOv8 (face) - Try to download if not exists, with fallback to general model
         if YOLO_AVAILABLE:
             try:
-                # Get safe device first
-                device = get_safe_device()
+                # ✅ CRITICAL FIX: Clear CUDA cache before loading YOLOv8
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    # Check available GPU memory
+                    allocated = torch.cuda.memory_allocated() / (1024**3)
+                    total_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    free_memory = total_memory - allocated
+                    
+                    # If less than 500MB free, force CPU
+                    if free_memory < 0.5:
+                        logger.warning(f"⚠️ GPU memory low ({free_memory:.2f}GB free), using CPU for YOLOv8")
+                        device = "cpu"
+                    else:
+                        device = get_safe_device()
+                        # Double-check device is still safe
+                        if device != "cpu" and torch.cuda.is_available():
+                            # Check again after getting device
+                            allocated = torch.cuda.memory_allocated() / (1024**3)
+                            free_memory = total_memory - allocated
+                            if free_memory < 0.5:
+                                logger.warning(f"⚠️ GPU memory dropped below threshold, forcing CPU")
+                                device = "cpu"
+                else:
+                    device = "cpu"
+                
                 logger.info(f"[FIX] Using device: {device}")
                 
+                # Try face-specific model first, then fallback to general model
                 if yolo_model_path and os.path.exists(yolo_model_path):
                     # Check file size to ensure it's not corrupted
                     file_size = os.path.getsize(yolo_model_path)
                     if file_size < 1000000:  # Less than 1MB, likely corrupted
-                        logger.warning(f"YOLOv8 model file too small ({file_size} bytes), likely corrupted")
+                        logger.warning(f"YOLOv8 face model file too small ({file_size} bytes), likely corrupted")
                         raise Exception("Model file corrupted")
                     
                     # Initialize YOLO with explicit device and proper configuration
-                    self.yolo_model = YOLO(yolo_model_path)
-                    
-                    # Force device assignment with proper error handling
                     try:
-                        with SuppressWarnings():
-                            if device == "cpu":
-                                self.yolo_model.to("cpu")
-                                # Test CPU inference
-                                test_input = torch.randn(1, 3, 640, 640)
-                                with torch.no_grad():
-                                    _ = self.yolo_model(test_input, verbose=False, device="cpu")
+                        self.yolo_model = YOLO(yolo_model_path)
+                        # ✅ CRITICAL FIX: Try to load on target device, fallback to CPU on OOM
+                        try:
+                            if device != "cpu":
+                                self.yolo_model.to(device)
+                                logger.info(f"✅ YOLOv8 loaded on {device} (FP32)")
                             else:
-                                # Test CUDA inference - create on CPU first
-                                test_input = torch.randn(1, 3, 640, 640)  # Create on CPU first
-                                test_input = test_input.to(device)  # Move to device safely
-                                with torch.no_grad():
-                                    _ = self.yolo_model(test_input, verbose=False, device=device)
-                        
-                        logger.info(f"YOLOv8 face model loaded successfully on {device}")
-                    except Exception as device_error:
-                        logger.warning(f"Device assignment failed: {device_error}, forcing CPU mode")
-                        self.yolo_model.to("cpu")
-                        device = "cpu"
-                        
+                                self.yolo_model.to("cpu")
+                                logger.info(f"✅ YOLOv8 loaded on CPU")
+                        except RuntimeError as oom_error:
+                            if "CUDA" in str(oom_error) or "memory" in str(oom_error).lower():
+                                logger.warning(f"⚠️ CUDA OOM loading YOLOv8: {oom_error}")
+                                logger.warning("⚠️ Falling back to CPU for YOLOv8")
+                                device = "cpu"
+                                torch.cuda.empty_cache()
+                                self.yolo_model.to("cpu")
+                                logger.info(f"✅ YOLOv8 loaded on CPU (fallback)")
+                            else:
+                                raise oom_error
+                    except Exception as load_error:
+                        logger.warning(f"⚠️ YOLOv8 face model loading failed: {load_error}")
+                        raise load_error
                 else:
+                    # Fallback to general YOLOv8 model if face model not available
+                    logger.warning(f"YOLOv8 face model not found at {yolo_model_path}, using general YOLOv8 model")
+                    try:
+                        self.yolo_model = YOLO('yolov8n.pt')  # Use general YOLOv8 model as fallback
+                        
+                        # ✅ CRITICAL FIX: Try target device first, fallback to CPU on OOM
+                        try:
+                            if device != "cpu":
+                                self.yolo_model.to(device)
+                                logger.info(f"✅ YOLOv8 general model loaded on {device} (FP32)")
+                            else:
+                                self.yolo_model.to("cpu")
+                                logger.info(f"✅ YOLOv8 general model loaded on CPU")
+                        except RuntimeError as oom_error:
+                            if "CUDA" in str(oom_error) or "memory" in str(oom_error).lower():
+                                logger.warning(f"⚠️ CUDA OOM loading YOLOv8: {oom_error}")
+                                logger.warning("⚠️ Falling back to CPU for YOLOv8")
+                                device = "cpu"
+                                torch.cuda.empty_cache()
+                                self.yolo_model.to("cpu")
+                                logger.info(f"✅ YOLOv8 general model loaded on CPU (fallback)")
+                            else:
+                                raise oom_error
+                    except Exception as general_error:
+                        logger.warning(f"⚠️ General YOLOv8 model loading failed: {general_error}")
+                        # Try CPU as last resort
+                        try:
+                            device = "cpu"
+                            torch.cuda.empty_cache()
+                            self.yolo_model = YOLO('yolov8n.pt')
+                            self.yolo_model.to("cpu")
+                            logger.info(f"✅ YOLOv8 loaded on CPU (last resort)")
+                        except Exception as cpu_error:
+                            logger.error(f"❌ YOLOv8 failed to load even on CPU: {cpu_error}")
+                            raise cpu_error
+                
+                # Additional fallback if model loading failed
+                if self.yolo_model is None:
                     # Try to auto-download
                     try:
+                        device = "cpu"  # Use CPU as safest option
+                        torch.cuda.empty_cache()
                         self.yolo_model = YOLO('yolov8n.pt')  # Use general model as fallback
-                        if device == "cpu":
-                            self.yolo_model.to("cpu")
-                        logger.info(f"YOLOv8 general model loaded as fallback for face detection on {device}")
+                        self.yolo_model.to("cpu")
+                        logger.info(f"✅ YOLOv8 general model loaded as fallback on CPU")
                     except Exception as download_error:
                         logger.warning(f"YOLOv8 auto-download failed: {download_error}")
                         raise download_error
             except Exception as e:
                 logger.warning(f"YOLOv8 model failed to load: {e}")
                 self.yolo_model = None
+                # Clear cache on failure
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-        # MTCNN with enhanced error handling
+        # MTCNN with Python 3.13 compatibility
         if MTCNN_AVAILABLE and self.yolo_model is None:
             try:
-                # Create MTCNN with default parameters (custom parameters not supported)
-                self.detector = MTCNN()
-                logger.info("MTCNN initialized as primary detector")
+                # Use the safe MTCNN wrapper
+                self.detector = MTCNN_DETECTOR
+                if self.detector and self.detector.available:
+                    logger.info("MTCNN initialized as primary detector (Python 3.13 compatible)")
+                else:
+                    logger.warning("MTCNN wrapper not available")
+                    self.detector = None
             except Exception as e:
                 logger.warning(f"MTCNN init failed: {e}")
-                # Try to identify specific error types
-                if "subscriptable" in str(e):
-                    logger.warning("MTCNN subscriptable error detected - likely LZ4 compatibility issue")
-                elif "version" in str(e):
-                    logger.warning("MTCNN version compatibility issue detected")
-                else:
-                    self.detector = None
+                self.detector = None
         
         # Ensure we have at least one detector
         if self.yolo_model is None and self.detector is None:
@@ -585,6 +661,46 @@ class FaceExtractor:
             self._last_log_time = current_time
             return True
         return False
+    
+    def _is_face_quality_good(self, face_img: np.ndarray) -> bool:
+        """Check if face image has acceptable quality for deepfake detection"""
+        try:
+            if face_img is None or face_img.size == 0:
+                logger.debug("Face quality check: FAILED - Empty or None face image")
+                return False
+            
+            # Check minimum dimensions (extremely lenient for better detection)
+            height, width = face_img.shape[0], face_img.shape[1]
+            if height < 30 or width < 30:
+                logger.debug(f"Face quality check: FAILED - Size too small ({width}x{height}) - minimum 30x30")
+                return False
+            
+            # Check for sufficient contrast (not too dark or too bright) - extremely lenient
+            gray = cv2.cvtColor(face_img, cv2.COLOR_RGB2GRAY) if len(face_img.shape) == 3 else face_img
+            mean_brightness = np.mean(gray)
+            if mean_brightness < 10 or mean_brightness > 250:  # Extremely lenient brightness range
+                logger.debug(f"Face quality check: FAILED - Brightness out of range ({mean_brightness:.1f}) - range 10-250")
+                return False
+            
+            # Check for sufficient contrast (standard deviation) - extremely lenient
+            contrast = np.std(gray)
+            if contrast < 3:  # Very low contrast requirement
+                logger.debug(f"Face quality check: FAILED - Low contrast ({contrast:.1f}) - minimum 3")
+                return False
+            
+            # Check for blur (Laplacian variance) - extremely lenient
+            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+            if laplacian_var < 5:  # Very low blur requirement
+                logger.debug(f"Face quality check: FAILED - Too blurry ({laplacian_var:.1f}) - minimum 5")
+                return False
+            
+            logger.debug(f"Face quality check: PASSED - Size: {width}x{height}, Brightness: {mean_brightness:.1f}, Contrast: {contrast:.1f}, Blur: {laplacian_var:.1f}")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Face quality check failed: {e}")
+            # Return True on error to avoid rejecting faces due to quality check failures
+            return True
 
     def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int, np.ndarray]]:
         faces = []
@@ -626,16 +742,18 @@ class FaceExtractor:
                                 face_indices = range(len(xyxy))
                             
                             for i in face_indices:
-                                if conf[i] > 0.6:  # Higher threshold for better quality
+                                if conf[i] > 0.4:  # ✅ FIXED: Lower threshold to detect more faces
                                     x1, y1, x2, y2 = map(int, xyxy[i])
                                     w, h = x2 - x1, y2 - y1
                                     
-                                    # Validate coordinates with stricter requirements
+                                    # ✅ FIXED: More strict face size requirements for quality
                                     if (x1 >= 0 and y1 >= 0 and 
                                         x2 <= rgb.shape[1] and y2 <= rgb.shape[0] and
-                                        w > 40 and h > 40):  # Increased minimum face size
+                                        w > 80 and h > 80):  # Increased minimum face size for better quality
                                         
                                         face_img = rgb[y1:y2, x1:x2]
+                                        
+                                        # ✅ FIXED: Accept all detected faces (quality check disabled)
                                         faces.append((x1, y1, w, h, face_img))
                                         
                                         if self._should_log_detection():
@@ -646,30 +764,63 @@ class FaceExtractor:
                             self._yolo_failure_count = 0
                             
                 except Exception as inference_error:
-                    logger.warning(f"YOLOv8 inference failed: {inference_error}")
-                    # Try to force CPU mode if CUDA fails
-                    if "CUDA" in str(inference_error) or "NMS" in str(inference_error):
+                    error_str = str(inference_error)
+                    # Check if it's a CUDA OOM error or memory issue
+                    is_cuda_oom = ("CUDA" in error_str and ("out of memory" in error_str.lower() or "OOM" in error_str)) or "memory" in error_str.lower()
+                    
+                    if is_cuda_oom:
+                        logger.warning(f"YOLOv8 GPU OOM: {inference_error}")
                         logger.info("[LOADING] CUDA inference failed, forcing CPU mode")
+                        # Clear GPU cache before switching
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except:
+                            pass
+                        
                         if self._force_yolo_cpu_mode():
                             # Retry with CPU
                             try:
                                 results = self.yolo_model(rgb, verbose=False, device="cpu")
-                                # Process results again...
-                                # (This is a simplified retry - you might want to duplicate the processing logic)
+                                if results and len(results) > 0:
+                                    boxes = results[0].boxes
+                                    if boxes is not None and len(boxes) > 0:
+                                        # Process boxes (same logic as above)
+                                        xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, 'cpu') else boxes.xyxy.numpy()
+                                        conf = boxes.conf.cpu().numpy() if hasattr(boxes.conf, 'cpu') else boxes.conf.numpy()
+                                        for i in range(len(xyxy)):
+                                            if conf[i] > 0.4:
+                                                x1, y1, x2, y2 = map(int, xyxy[i])
+                                                w, h = x2 - x1, y2 - y1
+                                                if (x1 >= 0 and y1 >= 0 and 
+                                                    x2 <= rgb.shape[1] and y2 <= rgb.shape[0] and
+                                                    w > 80 and h > 80):
+                                                    face_img = rgb[y1:y2, x1:x2]
+                                                    faces.append((x1, y1, w, h, face_img))
+                                self._yolo_failure_count = 0  # Reset on success
                             except Exception as cpu_error:
                                 logger.warning(f"CPU inference also failed: {cpu_error}")
                                 self._yolo_failure_count += 1
                         else:
                             self._yolo_failure_count += 1
+                    elif "CUDA" in error_str or "NMS" in error_str:
+                        logger.warning(f"YOLOv8 inference failed: {inference_error}")
+                        logger.info("[LOADING] CUDA inference failed, forcing CPU mode")
+                        if self._force_yolo_cpu_mode():
+                            self._yolo_failure_count = 0  # Reset on successful CPU mode
+                        else:
+                            self._yolo_failure_count += 1
                     else:
+                        logger.warning(f"YOLOv8 inference failed: {inference_error}")
                         self._yolo_failure_count += 1
                         
             except Exception as e:
                 logger.warning(f"YOLOv8 detection failed: {e}")
                 self._yolo_failure_count += 1
 
-        # 2) MTCNN (fallback)
-        if not faces and self.detector is not None:
+        # 2) MTCNN (fallback) - Python 3.13 compatible
+        if not faces and self.detector is not None and hasattr(self.detector, 'available') and self.detector.available:
             try:
                 results = self.detector.detect_faces(rgb)
                 if results:
@@ -690,10 +841,8 @@ class FaceExtractor:
                                     logger.info(f"MTCNN detected face {self._detection_counts['mtcnn']}: {w}x{h} @ ({x},{y})")
             except Exception as e:
                 logger.warning(f"MTCNN detection failed: {e}")
-                # If MTCNN fails consistently, disable it
-                if "subscriptable" in str(e) or "version" in str(e):
-                    logger.warning("Disabling MTCNN due to compatibility issues")
-                    self.detector = None
+                # MTCNN wrapper handles compatibility issues internally
+                pass
 
         # 3) OpenCV Haar cascade (final fallback)
         if not faces and self.face_cascade is not None:
@@ -701,10 +850,10 @@ class FaceExtractor:
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 detected = self.face_cascade.detectMultiScale(
                     gray,
-                    scaleFactor=1.1,
-                    minNeighbors=5,
-                    minSize=(60, 60),
-                    maxSize=(300, 300)
+                    scaleFactor=1.02,  # ✅ FIXED: More sensitive scaling
+                    minNeighbors=2,    # ✅ FIXED: Lower neighbor requirement
+                    minSize=(80, 80),  # ✅ FIXED: Larger minimum size for quality
+                    maxSize=(400, 400) # ✅ FIXED: Larger maximum size
                 )
                 
                 for (x, y, w, h) in detected:
@@ -713,6 +862,8 @@ class FaceExtractor:
                         x + w <= rgb.shape[1] and y + h <= rgb.shape[0]):
                         
                         face_img = rgb[y:y+h, x:x+w]
+                        
+                        # ✅ FIXED: Accept all detected faces (quality check disabled)
                         faces.append((x, y, w, h, face_img))
                         
                         if self._should_log_detection():
@@ -720,6 +871,15 @@ class FaceExtractor:
                             logger.info(f"OpenCV Haar detected face {self._detection_counts['haar']}: {w}x{h} @ ({x},{y})")
             except Exception as e:
                 logger.error(f"OpenCV Haar detection failed: {e}")
+
+        # Add face detection summary logging
+        yolo_count = self._detection_counts.get('yolo', 0)
+        mtcnn_count = self._detection_counts.get('mtcnn', 0)
+        haar_count = self._detection_counts.get('haar', 0)
+        total_detected = yolo_count + mtcnn_count + haar_count
+        
+        logger.info(f"Face detection summary - Total detected: {len(faces)}, "
+                   f"YOLOv8: {yolo_count}, MTCNN: {mtcnn_count}, Haar: {haar_count}")
 
         return faces
 
@@ -935,18 +1095,34 @@ def extract_faces_from_video_sync(video_path: str, frames_to_process: int = 15, 
         if not ret: 
             break
             
-        if frame_count % frame_interval == 0:
+        # ✅ FIXED: Process more frames for better face detection
+        if frame_count % (frame_interval // 2) == 0:  # Process every 15 frames instead of 30
             faces = face_extractor.detect_faces(frame)
             if faces: 
                 frames_with_faces += 1
                 
+            # ✅ FIXED: Process multiple faces per frame
             for (x, y, w, h, rgb_crop) in faces:
                 if processed_count >= frames_to_process: 
                     break
                 try:
                     pre = preprocess_face_crop(rgb_crop)
-                    extracted.append(pre)
-                    processed_count += 1
+                    
+                    # FIXED: Use FaceDataValidator to ensure proper numpy array format
+                    if FACE_VALIDATOR_AVAILABLE:
+                        validated_face = FaceDataValidator.validate_and_convert(pre, f"video_face_{processed_count}")
+                        if validated_face is not None:
+                            extracted.append(validated_face)
+                            processed_count += 1
+                        else:
+                            logger.warning(f"Face validation failed for face {processed_count}")
+                    else:
+                        # Fallback: ensure it's a numpy array
+                        if isinstance(pre, np.ndarray):
+                            extracted.append(pre)
+                            processed_count += 1
+                        else:
+                            logger.warning(f"Face is not numpy array: {type(pre)}")
                     
                     # Update progress every 3 seconds or when complete
                     update_progress_if_needed()

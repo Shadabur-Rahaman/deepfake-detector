@@ -45,18 +45,19 @@ class GlobalModelCache:
         """Get optimal device for model loading"""
         # Check for force CPU mode
         if (os.environ.get("FORCE_CPU_MODE", "0") == "1" or 
-            os.environ.get("CUDA_VISIBLE_DEVICES", "") == "" or
-            os.environ.get("MINIMAL_STARTUP_MODE", "0") == "1"):
+            os.environ.get("CUDA_VISIBLE_DEVICES", "") == ""):
             return "cpu"
         
         # Try CUDA if available
         try:
             if torch.cuda.is_available():
-                # Quick CUDA test
-                test_tensor = torch.tensor([1.0]).cuda()
-                del test_tensor
-                torch.cuda.empty_cache()
-                return "cuda"
+                # Use centralized CUDA safety manager to avoid driver conflicts
+                from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                
+                if is_cuda_available_global():
+                    return get_validated_device()
+                else:
+                    return "cpu"
         except Exception as e:
             logger.warning(f"CUDA test failed, using CPU: {e}")
         

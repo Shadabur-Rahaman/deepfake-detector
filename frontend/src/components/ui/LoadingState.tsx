@@ -58,33 +58,55 @@ export function LoadingState({
         {getIcon()}
       </motion.div>
       
-      <motion.h3
+      <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="text-lg font-semibold mb-2 neural-text"
+        className="text-center mb-4 w-full max-w-md"
       >
-        {getMessage()}
-      </motion.h3>
+        <h3 className="text-lg font-semibold mb-2 neural-text px-4">
+          {getMessage()}
+        </h3>
+      </motion.div>
       
       {progress !== undefined && (
         <motion.div
           initial={{ opacity: 0, width: 0 }}
           animate={{ opacity: 1, width: '100%' }}
           transition={{ delay: 0.4 }}
-          className="w-full max-w-xs"
+          className="w-full max-w-md"
         >
-          <div className="w-full bg-muted rounded-full h-2 mb-2">
+          <div className="w-full bg-muted rounded-full h-3 mb-3 overflow-hidden shadow-inner">
             <motion.div
-              className="bg-primary h-2 rounded-full"
+              className="bg-gradient-to-r from-primary to-accent h-3 rounded-full relative overflow-hidden"
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.5 }}
-            />
+              transition={{ duration: 0.5, ease: "easeOut" }}
+            >
+              {/* Shimmer effect for active progress */}
+              <motion.div
+                className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent"
+                animate={{
+                  x: ['-100%', '100%'],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "linear"
+                }}
+              />
+            </motion.div>
           </div>
-          <p className="text-sm text-muted-foreground text-center">
-            {progress.toFixed(0)}% complete
-          </p>
+          <div className="flex items-center justify-between text-sm">
+            <p className="text-muted-foreground font-medium">
+              {progress.toFixed(0)}% complete
+            </p>
+            {progress > 0 && progress < 100 && (
+              <p className="text-muted-foreground/70 text-xs">
+                Processing...
+              </p>
+            )}
+          </div>
         </motion.div>
       )}
       

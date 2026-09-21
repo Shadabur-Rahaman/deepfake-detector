@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { toast } from 'sonner';
 import { useAuth } from './SimpleAuthContext';
 import { WS_URL } from '@/config/api';
+import { demoNotifications, generateDemoNotifications } from '@/utils/notificationDemoData';
 
 export interface NotificationRequest {
   id: string;
@@ -80,6 +81,7 @@ interface EnhancedNotificationContextType {
   getNotificationsByPriority: (priority: string) => NotificationRequest[];
   searchNotifications: (query: string) => NotificationRequest[];
   refreshNotifications: () => Promise<void>;
+  generateDemoData: () => void;
   
   // WebSocket
   connectWebSocket: () => void;
@@ -147,7 +149,12 @@ export const EnhancedNotificationProvider: React.FC<{ children: React.ReactNode 
         setNotifications(parsed);
       } catch (error) {
         console.error('Error loading saved notifications:', error);
+        // Fallback to demo data if localStorage is corrupted
+        setNotifications(demoNotifications);
       }
+    } else {
+      // Load demo data for testing
+      setNotifications(demoNotifications);
     }
   }, []);
 
@@ -518,6 +525,12 @@ export const EnhancedNotificationProvider: React.FC<{ children: React.ReactNode 
     }
   }, []);
 
+  const generateDemoData = useCallback(() => {
+    const newDemoNotifications = generateDemoNotifications(5);
+    setNotifications(prev => [...newDemoNotifications, ...prev]);
+    toast.success('Demo notifications generated');
+  }, []);
+
   const calculateStats = useCallback(() => {
     const stats: NotificationStats = {
       totalRequests: notifications.length,
@@ -577,6 +590,7 @@ export const EnhancedNotificationProvider: React.FC<{ children: React.ReactNode 
     getNotificationsByPriority,
     searchNotifications,
     refreshNotifications,
+    generateDemoData,
     connectWebSocket,
     disconnectWebSocket
   };

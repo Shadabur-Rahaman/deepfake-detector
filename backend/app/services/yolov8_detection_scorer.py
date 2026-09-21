@@ -1,439 +1,300 @@
 """
-YOLOv8 Detection Scorer - Deepfake Detection Using Face Quality Analysis
-======================================================================
+YOLOv8 Detection Scorer
+=======================
 
-This module uses YOLOv8 face detection quality scores to detect deepfake content.
-The key insight is that deepfake generation often produces faces with lower detection
-confidence or inconsistent detection patterns compared to authentic faces.
+Face quality assessment using YOLOv8 for deepfake detection.
+Provides confidence scores, face size metrics, and blur detection.
 
-Author: AI Assistant
-Date: 2025
+Author: Deepfake Detection System
+Version: 1.0.0
 """
 
+import logging
 import numpy as np
 import cv2
-import torch
-import logging
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from typing import List, Dict, Any, Optional
+from .face_data_validator import FaceDataValidator
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class YOLOv8DetectionResult:
-    """Result of YOLOv8-based deepfake detection"""
-    prediction: str
-    confidence: float
-    face_quality_scores: List[float]
-    detection_consistency: float
-    average_detection_confidence: float
-    quality_variance: float
-    reasoning: str
-    metadata: Dict[str, Any]
-
 class YOLOv8DetectionScorer:
     """
-    YOLOv8-based deepfake detection using face quality analysis
-    
-    Features:
-    - Face detection quality analysis
-    - Detection consistency across frames
-    - Quality variance analysis
-    - Confidence pattern analysis
+    YOLOv8-based face quality scorer for deepfake detection
     """
     
     def __init__(self):
-        self.yolo_model = None
-        self.quality_threshold = 0.7  # Threshold for high-quality face detection
-        self.consistency_threshold = 0.8  # Threshold for detection consistency
-        self.quality_weight = 0.4  # Weight for face quality
-        self.consistency_weight = 0.3  # Weight for detection consistency
-        self.variance_weight = 0.3  # Weight for quality variance
-        
-        # Initialize YOLOv8 if available
+        self.face_validator = FaceDataValidator()
+        self.is_initialized = False
         self._initialize_yolo()
     
     def _initialize_yolo(self):
-        """Initialize YOLOv8 face detection model"""
+        """Initialize YOLOv8 model for face detection"""
         try:
-            # Try to import and load YOLOv8 face detection
+            # Try to import ultralytics YOLOv8
             from ultralytics import YOLO
             
-            # Load YOLOv8 face detection model with CPU device
-            self.yolo_model = YOLO('yolov8n-face.pt')
-            # Force CPU mode to avoid CUDA driver errors
-            self.yolo_model.to('cpu')
-            logger.info("✅ YOLOv8 face detection model loaded successfully on CPU")
+            # Load YOLOv8 face detection model
+            self.yolo_model = YOLO('yolov8n.pt')  # Use nano for speed
+            self.is_initialized = True
+            logger.info("✅ YOLOv8 Detection Scorer initialized successfully")
             
         except ImportError:
-            logger.warning("⚠️ YOLOv8 not available, using OpenCV fallback")
-            self.yolo_model = None
+            logger.warning("⚠️ ultralytics not available, using OpenCV fallback")
+            self._initialize_opencv_fallback()
         except Exception as e:
-            logger.warning(f"⚠️ Failed to load YOLOv8: {e}, using OpenCV fallback")
-            self.yolo_model = None
+            logger.warning(f"⚠️ YOLOv8 initialization failed: {e}, using OpenCV fallback")
+            self._initialize_opencv_fallback()
     
-    def analyze_faces_for_deepfake(self, faces: List[np.ndarray], video_path: Optional[str] = None) -> YOLOv8DetectionResult:
+    def _initialize_opencv_fallback(self):
+        """Initialize OpenCV-based face detection as fallback"""
+        try:
+            # Load OpenCV Haar cascade for face detection
+            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            
+            if self.face_cascade.empty():
+                logger.error("❌ Failed to load OpenCV Haar cascade")
+                self.is_initialized = False
+            else:
+                self.is_initialized = True
+                logger.info("✅ YOLOv8 Detection Scorer initialized with OpenCV fallback")
+                
+        except Exception as e:
+            logger.error(f"❌ OpenCV fallback initialization failed: {e}")
+            self.is_initialized = False
+    
+    def score_faces(self, faces: List[np.ndarray]) -> Dict[str, Any]:
         """
-        Analyze faces using YOLOv8 detection quality for deepfake detection
+        Score face quality using YOLOv8 or OpenCV fallback
         
         Args:
-            faces: List of face images
-            video_path: Optional video path for additional context
+            faces: List of face images as numpy arrays
             
         Returns:
-            YOLOv8DetectionResult with deepfake analysis
+            Dictionary with quality scores and metrics including prediction
+        """
+        if not self.is_initialized:
+            logger.warning("⚠️ YOLOv8 Detection Scorer not initialized")
+            return self._get_default_scores(len(faces))
+        
+        # Validate all faces first
+        validated_faces = self.face_validator.validate_face_list(faces, "yolov8_scorer")
+        
+        if not validated_faces:
+            logger.warning("⚠️ No valid faces provided to YOLOv8 scorer")
+            return self._get_default_scores(len(faces))
+        
+        try:
+            if hasattr(self, 'yolo_model'):
+                scores = self._score_with_yolo(validated_faces)
+            else:
+                scores = self._score_with_opencv(validated_faces)
+            
+            # Add prediction based on quality scores
+            prediction_result = self.get_quality_prediction(scores)
+            scores.update(prediction_result)
+            
+            return scores
+                
+        except Exception as e:
+            logger.error(f"❌ Face scoring failed: {e}")
+            return self._get_default_scores(len(validated_faces))
+    
+    def _score_with_yolo(self, faces: List[np.ndarray]) -> Dict[str, Any]:
+        """Score faces using YOLOv8 model"""
+        try:
+            scores = []
+            confidences = []
+            face_sizes = []
+            blur_scores = []
+            
+            for face in faces:
+                # Resize face for YOLOv8 (640x640)
+                face_resized = cv2.resize(face, (640, 640))
+                
+                # Run YOLOv8 detection
+                results = self.yolo_model(face_resized, verbose=False)
+                
+                # Extract face detection results
+                face_detections = []
+                for result in results:
+                    boxes = result.boxes
+                    if boxes is not None:
+                        for box in boxes:
+                            # Filter for person class (class 0 in COCO)
+                            if int(box.cls) == 0:  # Person class
+                                conf = float(box.conf)
+                                if conf > 0.3:  # Minimum confidence threshold
+                                    face_detections.append(conf)
+                
+                # Calculate metrics
+                if face_detections:
+                    max_conf = max(face_detections)
+                    confidences.append(max_conf)
+                    
+                    # Face size score (larger faces are better)
+                    face_area = face.shape[0] * face.shape[1]
+                    size_score = min(1.0, face_area / (224 * 224))  # Normalize to 224x224
+                    face_sizes.append(size_score)
+                    
+                    # Blur detection using Laplacian variance
+                    gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY) if len(face.shape) == 3 else face
+                    blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+                    blur_scores.append(min(1.0, blur_score / 1000))  # Normalize
+                    
+                    # Overall quality score
+                    quality_score = (max_conf * 0.4 + size_score * 0.3 + blur_score * 0.3)
+                    scores.append(quality_score)
+                else:
+                    # No face detected
+                    confidences.append(0.0)
+                    face_sizes.append(0.0)
+                    blur_scores.append(0.0)
+                    scores.append(0.0)
+            
+            return {
+                'model': 'YOLOv8',
+                'face_count': len(faces),
+                'detected_faces': sum(1 for c in confidences if c > 0.3),
+                'avg_confidence': np.mean(confidences) if confidences else 0.0,
+                'avg_face_size': np.mean(face_sizes) if face_sizes else 0.0,
+                'avg_blur_score': np.mean(blur_scores) if blur_scores else 0.0,
+                'avg_quality_score': np.mean(scores) if scores else 0.0,
+                'individual_scores': scores,
+                'detection_rate': sum(1 for c in confidences if c > 0.3) / len(faces) if faces else 0.0
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ YOLOv8 scoring failed: {e}")
+            return self._get_default_scores(len(faces))
+    
+    def _score_with_opencv(self, faces: List[np.ndarray]) -> Dict[str, Any]:
+        """Score faces using OpenCV Haar cascade fallback"""
+        try:
+            scores = []
+            confidences = []
+            face_sizes = []
+            blur_scores = []
+            
+            for face in faces:
+                # Convert to grayscale for OpenCV
+                gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY) if len(face.shape) == 3 else face
+                
+                # Enhance image for better detection
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+                enhanced = clahe.apply(gray)
+                
+                # Detect faces
+                detected_faces = self.face_cascade.detectMultiScale(
+                    enhanced,
+                    scaleFactor=1.05,
+                    minNeighbors=3,
+                    minSize=(20, 20)
+                )
+                
+                if len(detected_faces) > 0:
+                    # Use the largest detected face
+                    largest_face = max(detected_faces, key=lambda x: x[2] * x[3])
+                    x, y, w, h = largest_face
+                    
+                    # Confidence based on face size and detection quality
+                    face_area = w * h
+                    conf = min(1.0, face_area / (100 * 100))  # Normalize
+                    confidences.append(conf)
+                    
+                    # Face size score
+                    size_score = min(1.0, face_area / (224 * 224))
+                    face_sizes.append(size_score)
+                    
+                    # Blur detection
+                    face_roi = gray[y:y+h, x:x+w]
+                    blur_score = cv2.Laplacian(face_roi, cv2.CV_64F).var()
+                    blur_scores.append(min(1.0, blur_score / 1000))
+                    
+                    # Overall quality score
+                    quality_score = (conf * 0.4 + size_score * 0.3 + blur_score * 0.3)
+                    scores.append(quality_score)
+                else:
+                    # No face detected
+                    confidences.append(0.0)
+                    face_sizes.append(0.0)
+                    blur_scores.append(0.0)
+                    scores.append(0.0)
+            
+            return {
+                'model': 'OpenCV_Haar',
+                'face_count': len(faces),
+                'detected_faces': sum(1 for c in confidences if c > 0.1),
+                'avg_confidence': np.mean(confidences) if confidences else 0.0,
+                'avg_face_size': np.mean(face_sizes) if face_sizes else 0.0,
+                'avg_blur_score': np.mean(blur_scores) if blur_scores else 0.0,
+                'avg_quality_score': np.mean(scores) if scores else 0.0,
+                'individual_scores': scores,
+                'detection_rate': sum(1 for c in confidences if c > 0.1) / len(faces) if faces else 0.0
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ OpenCV scoring failed: {e}")
+            return self._get_default_scores(len(faces))
+    
+    def _get_default_scores(self, face_count: int) -> Dict[str, Any]:
+        """Return default scores when scoring fails"""
+        return {
+            'model': 'Default',
+            'face_count': face_count,
+            'detected_faces': 0,
+            'avg_confidence': 0.0,
+            'avg_face_size': 0.0,
+            'avg_blur_score': 0.0,
+            'avg_quality_score': 0.0,
+            'individual_scores': [0.0] * face_count,
+            'detection_rate': 0.0,
+            'prediction': 'uncertain',
+            'confidence': 0.5,
+            'quality_score': 0.0
+        }
+    
+    def get_quality_prediction(self, scores: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert quality scores to deepfake prediction
+        
+        Args:
+            scores: Quality scores from score_faces()
+            
+        Returns:
+            Prediction with confidence
         """
         try:
-            if not faces:
-                return self._create_empty_result("No faces provided")
+            avg_quality = scores.get('avg_quality_score', 0.0)
+            detection_rate = scores.get('detection_rate', 0.0)
+            avg_confidence = scores.get('avg_confidence', 0.0)
             
-            logger.info(f"🔍 YOLOv8 Detection Analysis: Processing {len(faces)} faces")
-            
-            # Analyze face detection quality
-            quality_scores = []
-            detection_confidences = []
-            
-            for i, face in enumerate(faces):
-                try:
-                    # Convert face to proper format
-                    face_processed = self._preprocess_face(face)
-                    if face_processed is None:
-                        continue
-                    
-                    # Get detection quality score
-                    quality_score, detection_conf = self._analyze_face_quality(face_processed)
-                    quality_scores.append(quality_score)
-                    detection_confidences.append(detection_conf)
-                    
-                    logger.debug(f"Face {i}: quality={quality_score:.3f}, conf={detection_conf:.3f}")
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to analyze face {i}: {e}")
-                    continue
-            
-            if not quality_scores:
-                return self._create_empty_result("No valid face analysis")
-            
-            # Calculate detection metrics
-            avg_quality = np.mean(quality_scores)
-            avg_confidence = np.mean(detection_confidences)
-            quality_variance = np.var(quality_scores)
-            detection_consistency = self._calculate_detection_consistency(detection_confidences)
-            
-            # Calculate deepfake probability based on quality analysis
-            deepfake_probability = self._calculate_deepfake_probability(
-                avg_quality, avg_confidence, quality_variance, detection_consistency
-            )
-            
-            # Determine prediction
-            if deepfake_probability >= 0.5:
-                prediction = "Deepfake Detected"
-                confidence = deepfake_probability
+            # Combine metrics for prediction
+            # Lower quality scores and detection rates suggest potential deepfakes
+            if detection_rate < 0.3 or avg_quality < 0.3:
+                prediction = 'deepfake'
+                confidence = min(0.9, 0.5 + (0.3 - avg_quality) * 2)
+            elif detection_rate > 0.7 and avg_quality > 0.6:
+                prediction = 'real'
+                confidence = min(0.9, 0.5 + (avg_quality - 0.6) * 2)
             else:
-                prediction = "Real Face"
-                confidence = 1.0 - deepfake_probability
+                prediction = 'uncertain'
+                confidence = 0.5
             
-            # Generate reasoning
-            reasoning = self._generate_reasoning(
-                avg_quality, avg_confidence, quality_variance, detection_consistency, deepfake_probability
-            )
-            
-            result = YOLOv8DetectionResult(
-                prediction=prediction,
-                confidence=confidence,
-                face_quality_scores=quality_scores,
-                detection_consistency=detection_consistency,
-                average_detection_confidence=avg_confidence,
-                quality_variance=quality_variance,
-                reasoning=reasoning,
-                metadata={
-                    'faces_analyzed': len(faces),
-                    'valid_analyses': len(quality_scores),
-                    'deepfake_probability': deepfake_probability,
-                    'yolo_model_used': self.yolo_model is not None
-                }
-            )
-            
-            logger.info(f"🎯 YOLOv8 Analysis Result: {prediction} (confidence: {confidence:.3f})")
-            logger.info(f"   📊 Quality: {avg_quality:.3f}, Consistency: {detection_consistency:.3f}")
-            logger.info(f"   📈 Variance: {quality_variance:.3f}, Deepfake Prob: {deepfake_probability:.3f}")
-            
-            return result
+            return {
+                'prediction': prediction,
+                'confidence': confidence,
+                'quality_score': avg_quality,
+                'detection_rate': detection_rate,
+                'model': scores.get('model', 'Unknown')
+            }
             
         except Exception as e:
-            logger.error(f"YOLOv8 detection analysis failed: {e}")
-            return self._create_empty_result(f"Analysis failed: {str(e)}")
-    
-    def _preprocess_face(self, face) -> Optional[np.ndarray]:
-        """Preprocess face for YOLOv8 analysis"""
-        try:
-            # Convert tensor to numpy if needed
-            if isinstance(face, torch.Tensor):
-                face = face.detach().cpu().numpy()
-                # Handle CHW to HWC if needed
-                if len(face.shape) == 3 and face.shape[0] == 3:
-                    face = np.transpose(face, (1, 2, 0))
-                # Denormalize if normalized
-                if face.max() <= 1.0:
-                    face = (face * 255).astype(np.uint8)
-            
-            # Ensure it's a numpy array
-            if not isinstance(face, np.ndarray):
-                logger.warning(f"Face is not numpy array: {type(face)}")
-                return None
-            
-            # Ensure proper data type
-            if face.dtype != np.uint8:
-                face = np.clip(face, 0, 255).astype(np.uint8)
-            
-            # Ensure proper shape
-            if len(face.shape) == 3 and face.shape[2] == 3:
-                # Already RGB/BGR
-                return face
-            elif len(face.shape) == 2:
-                # Grayscale, convert to RGB
-                return cv2.cvtColor(face, cv2.COLOR_GRAY2RGB)
-            else:
-                logger.warning(f"Invalid face shape: {face.shape}")
-                return None
-                
-        except Exception as e:
-            logger.warning(f"Face preprocessing failed: {e}")
-            return None
-    
-    def _analyze_face_quality(self, face: np.ndarray) -> Tuple[float, float]:
-        """Analyze face quality using YOLOv8 or OpenCV fallback"""
-        try:
-            if self.yolo_model is not None:
-                return self._analyze_with_yolo(face)
-            else:
-                return self._analyze_with_opencv(face)
-                
-        except Exception as e:
-            logger.warning(f"Face quality analysis failed: {e}")
-            return 0.5, 0.5  # Neutral fallback
-    
-    def _analyze_with_yolo(self, face: np.ndarray) -> Tuple[float, float]:
-        """Analyze face quality using YOLOv8"""
-        try:
-            # Run YOLOv8 detection
-            results = self.yolo_model(face, verbose=False)
-            
-            if results and len(results) > 0:
-                result = results[0]
-                
-                if result.boxes is not None and len(result.boxes) > 0:
-                    # Get face detection confidence
-                    confidences = result.boxes.conf.cpu().numpy()
-                    max_confidence = np.max(confidences)
-                    
-                    # Calculate quality score based on detection confidence and face properties
-                    quality_score = self._calculate_yolo_quality_score(face, max_confidence, result)
-                    
-                    return quality_score, max_confidence
-                else:
-                    # No face detected - potentially suspicious
-                    return 0.2, 0.0
-            else:
-                # No results - potentially suspicious
-                return 0.2, 0.0
-                
-        except Exception as e:
-            logger.warning(f"YOLOv8 analysis failed: {e}")
-            return 0.5, 0.5
-    
-    def _calculate_yolo_quality_score(self, face: np.ndarray, confidence: float, result) -> float:
-        """Calculate quality score from YOLOv8 results"""
-        try:
-            # Base quality from detection confidence
-            base_quality = confidence
-            
-            # Additional quality factors
-            face_area = face.shape[0] * face.shape[1]
-            size_factor = min(1.0, face_area / 10000)  # Larger faces are generally better quality
-            
-            # Sharpness factor
-            gray = cv2.cvtColor(face, cv2.COLOR_RGB2GRAY) if len(face.shape) == 3 else face
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            sharpness_factor = min(1.0, laplacian_var / 1000)
-            
-            # Combine factors
-            quality_score = (base_quality * 0.6 + size_factor * 0.2 + sharpness_factor * 0.2)
-            
-            return np.clip(quality_score, 0.0, 1.0)
-            
-        except Exception as e:
-            logger.warning(f"YOLOv8 quality calculation failed: {e}")
-            return confidence
-    
-    def _analyze_with_opencv(self, face: np.ndarray) -> Tuple[float, float]:
-        """Fallback analysis using OpenCV face detection"""
-        try:
-            # Load OpenCV face cascade
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            
-            # Convert to grayscale for detection
-            gray = cv2.cvtColor(face, cv2.COLOR_RGB2GRAY) if len(face.shape) == 3 else face
-            
-            # Detect faces
-            faces_detected = face_cascade.detectMultiScale(gray, 1.1, 4)
-            
-            if len(faces_detected) > 0:
-                # Calculate quality based on detection parameters
-                # More faces detected with higher confidence suggests better quality
-                face_count = len(faces_detected)
-                confidence = min(0.9, face_count * 0.3)  # Approximate confidence
-                
-                # Calculate quality score
-                quality_score = self._calculate_opencv_quality_score(face, faces_detected)
-                
-                return quality_score, confidence
-            else:
-                # No face detected
-                return 0.2, 0.0
-                
-        except Exception as e:
-            logger.warning(f"OpenCV analysis failed: {e}")
-            return 0.5, 0.5
-    
-    def _calculate_opencv_quality_score(self, face: np.ndarray, faces_detected) -> float:
-        """Calculate quality score from OpenCV detection results"""
-        try:
-            # Base quality from face count (more faces = better detection)
-            face_count = len(faces_detected)
-            base_quality = min(0.8, face_count * 0.4)
-            
-            # Size factor
-            face_area = face.shape[0] * face.shape[1]
-            size_factor = min(1.0, face_area / 10000)
-            
-            # Sharpness factor
-            gray = cv2.cvtColor(face, cv2.COLOR_RGB2GRAY) if len(face.shape) == 3 else face
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            sharpness_factor = min(1.0, laplacian_var / 1000)
-            
-            # Combine factors
-            quality_score = (base_quality * 0.4 + size_factor * 0.3 + sharpness_factor * 0.3)
-            
-            return np.clip(quality_score, 0.0, 1.0)
-            
-        except Exception as e:
-            logger.warning(f"OpenCV quality calculation failed: {e}")
-            return 0.5
-    
-    def _calculate_detection_consistency(self, confidences: List[float]) -> float:
-        """Calculate consistency of detection confidences across frames"""
-        try:
-            if len(confidences) <= 1:
-                return 1.0
-            
-            # Calculate coefficient of variation (lower = more consistent)
-            mean_conf = np.mean(confidences)
-            std_conf = np.std(confidences)
-            
-            if mean_conf == 0:
-                return 1.0
-            
-            cv = std_conf / mean_conf
-            consistency = 1.0 - min(cv, 1.0)  # Convert to consistency score
-            
-            return np.clip(consistency, 0.0, 1.0)
-            
-        except Exception as e:
-            logger.warning(f"Consistency calculation failed: {e}")
-            return 0.5
-    
-    def _calculate_deepfake_probability(self, avg_quality: float, avg_confidence: float, 
-                                      quality_variance: float, detection_consistency: float) -> float:
-        """Calculate deepfake probability based on quality metrics with conservative bias"""
-        try:
-            # Lower quality and confidence suggest deepfake
-            quality_factor = 1.0 - avg_quality  # Invert quality (lower quality = higher fake probability)
-            confidence_factor = 1.0 - avg_confidence  # Invert confidence
-            
-            # Higher variance suggests inconsistency (potential deepfake) - but be more restrictive
-            variance_factor = min(quality_variance * 3, 1.0)  # Increased multiplier for more sensitivity
-            
-            # Lower consistency suggests deepfake
-            consistency_factor = 1.0 - detection_consistency
-            
-            # Weighted combination with reduced weights to favor real content
-            deepfake_prob = (
-                quality_factor * self.quality_weight * 0.7 +  # 30% reduction
-                confidence_factor * 0.15 +  # Reduced from 0.2
-                variance_factor * self.variance_weight * 0.8 +  # 20% reduction
-                consistency_factor * self.consistency_weight * 0.7  # 30% reduction
-            )
-            
-            # Apply additional conservative bias - reduce final probability by 25%
-            conservative_prob = deepfake_prob * 0.75
-            
-            return np.clip(conservative_prob, 0.0, 1.0)
-            
-        except Exception as e:
-            logger.warning(f"Deepfake probability calculation failed: {e}")
-            return 0.5
-    
-    def _generate_reasoning(self, avg_quality: float, avg_confidence: float, 
-                          quality_variance: float, detection_consistency: float, 
-                          deepfake_probability: float) -> str:
-        """Generate human-readable reasoning for the detection result"""
-        try:
-            reasoning_parts = []
-            
-            # Quality analysis
-            if avg_quality >= 0.8:
-                reasoning_parts.append("high face detection quality")
-            elif avg_quality >= 0.6:
-                reasoning_parts.append("moderate face detection quality")
-            else:
-                reasoning_parts.append("low face detection quality")
-            
-            # Confidence analysis
-            if avg_confidence >= 0.8:
-                reasoning_parts.append("high detection confidence")
-            elif avg_confidence >= 0.6:
-                reasoning_parts.append("moderate detection confidence")
-            else:
-                reasoning_parts.append("low detection confidence")
-            
-            # Consistency analysis
-            if detection_consistency >= 0.8:
-                reasoning_parts.append("consistent detection patterns")
-            elif detection_consistency >= 0.6:
-                reasoning_parts.append("moderate detection consistency")
-            else:
-                reasoning_parts.append("inconsistent detection patterns")
-            
-            # Variance analysis
-            if quality_variance <= 0.1:
-                reasoning_parts.append("low quality variance")
-            elif quality_variance <= 0.3:
-                reasoning_parts.append("moderate quality variance")
-            else:
-                reasoning_parts.append("high quality variance")
-            
-            # Combine reasoning
-            reasoning = f"YOLOv8 analysis shows {', '.join(reasoning_parts)} (deepfake probability: {deepfake_probability:.3f})"
-            
-            return reasoning
-            
-        except Exception as e:
-            logger.warning(f"Reasoning generation failed: {e}")
-            return f"YOLOv8 analysis completed (deepfake probability: {deepfake_probability:.3f})"
-    
-    def _create_empty_result(self, reason: str) -> YOLOv8DetectionResult:
-        """Create empty result for error cases"""
-        return YOLOv8DetectionResult(
-            prediction="Analysis Failed",
-            confidence=0.0,
-            face_quality_scores=[],
-            detection_consistency=0.0,
-            average_detection_confidence=0.0,
-            quality_variance=0.0,
-            reasoning=reason,
-            metadata={'error': reason}
-        )
-
-# Global instance for easy access
-yolov8_detection_scorer = YOLOv8DetectionScorer()
+            logger.error(f"❌ Quality prediction failed: {e}")
+            return {
+                'prediction': 'uncertain',
+                'confidence': 0.5,
+                'quality_score': 0.0,
+                'detection_rate': 0.0,
+                'model': 'Error'
+            }

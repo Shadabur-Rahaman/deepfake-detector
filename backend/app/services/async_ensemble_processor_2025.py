@@ -371,7 +371,7 @@ class AsyncEnsembleProcessor2025:
         """Aggregate ensemble results using 2025 confidence aggregation"""
         try:
             # Import the 2025 confidence aggregator
-            from .confidence_aggregator_2025 import confidence_aggregator_2025, ModelType
+            from .confidence_aggregator_2025 import confidence_aggregator_2025
             
             # Separate successful and failed results
             successful_results = [r for r in results if r.status == ModelExecutionStatus.COMPLETED]
@@ -381,56 +381,52 @@ class AsyncEnsembleProcessor2025:
                 logger.error("Ensemble aggregation failed: 0 successful models")
                 return self._create_empty_result(time.time(), status="FAILED_NO_MODELS")
             
-            # Convert to the format expected by confidence aggregator
+            # Preserve individual model names (no ModelType category collisions)
             model_predictions = {}
             model_logits = {}
             execution_times = {}
             
             for result in successful_results:
-                # Map model names to ModelType enum
-                if "efficientnet" in result.model_name.lower():
-                    model_type = ModelType.EFFICIENTNET
-                elif "resnet" in result.model_name.lower():
-                    model_type = ModelType.RESNET
-                elif "transformer" in result.model_name.lower() or "vit" in result.model_name.lower():
-                    model_type = ModelType.VISION_TRANSFORMER
-                elif "convnext" in result.model_name.lower():
-                    model_type = ModelType.CONVNEXT
-                else:
-                    model_type = ModelType.CUSTOM
-                
-                model_predictions[model_type] = (result.prediction, result.confidence)
+                model_predictions[result.model_name] = (result.prediction, result.confidence)
                 if result.logits is not None:
-                    model_logits[model_type] = result.logits
+                    model_logits[result.model_name] = result.logits
                 execution_times[result.model_name] = result.execution_time
             
-            # Use neutral face quality metrics since faces are not available in this context
             from .confidence_aggregator_2025 import FaceQualityMetrics, TemporalConsistencyMetrics
             
-            # Use neutral values for face quality metrics
-            face_quality = FaceQualityMetrics(0.5, 0.5, 0.5, 0.5, 0.5, 0.5)  # Neutral values
-            temporal_metrics = TemporalConsistencyMetrics(0.5, 0.5, 0.5, 0.5)  # Neutral values
+            face_quality = FaceQualityMetrics(0.5, 0.5, 0.5, 0.5, 0.5, 0.5)
+            temporal_metrics = TemporalConsistencyMetrics(0.5, 0.5, 0.5, 0.5)
             
-            # Get ensemble prediction
+            # Forward named configured weights into the aggregator
             ensemble_result = confidence_aggregator_2025.aggregate_ensemble_predictions(
-                model_predictions, face_quality, temporal_metrics, model_logits
+                model_predictions,
+                face_quality,
+                temporal_metrics,
+                model_logits if model_logits else None,
+                named_weights=model_weights,
             )
             
-            # Calculate ensemble variance
+            # Calculate ensemble variance on fake probabilities for consistency
+            from .confidence_aggregator_2025 import to_fake_probability
             if len(successful_results) > 1:
-                confidences = [result.confidence for result in successful_results]
-                ensemble_variance = float(np.var(confidences))  # Convert numpy float to Python float
+                fake_probs = [
+                    to_fake_probability(result.prediction, result.confidence)
+                    for result in successful_results
+                ]
+                ensemble_variance = float(np.var(fake_probs))
             else:
                 ensemble_variance = 0.0
             
-            # ✅ STRUCTURED LOGGING: Add comprehensive metrics logging
-            import time
-            timestamp = time.time()
-            logger.info(f"ENSEMBLE_METRICS: timestamp={timestamp}, successful={len(successful_results)}, "
-                       f"failed={len(failed_results)}, ensemble_conf={ensemble_result.confidence:.3f}, "
-                       f"status=OK, prediction={ensemble_result.prediction}")
+            import time as _time
+            timestamp = _time.time()
+            fake_p = ensemble_result.detailed_breakdown.get('fake_probability', ensemble_result.confidence)
+            logger.info(
+                f"ENSEMBLE_METRICS: timestamp={timestamp}, successful={len(successful_results)}, "
+                f"failed={len(failed_results)}, ensemble_conf={ensemble_result.confidence:.3f}, "
+                f"fake_probability={fake_p}, status=OK, prediction={ensemble_result.prediction}, "
+                f"weights={ensemble_result.detailed_breakdown.get('model_weights', {})}"
+            )
             
-            # Create execution result
             return EnsembleExecutionResult(
                 predictions={result.model_name: (result.prediction, result.confidence) 
                            for result in successful_results},

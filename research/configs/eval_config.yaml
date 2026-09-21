@@ -1,0 +1,58 @@
+# Research evaluation configuration — all metrics must be regenerable from this file + code.
+seed: 42
+image_size: 224
+batch_size: 32
+num_workers: 0
+threshold: 0.5
+
+# Stratified split fractions on Dataset A (processed_faces_optimized)
+splits:
+  train: 0.70
+  calibration: 0.15
+  test: 0.15
+
+# Optional caps for faster local runs (null = use full split). Deterministic subsample.
+max_samples_per_split:
+  train: 4000
+  calibration: 1500
+  test: 1500
+  shift_test: 1500
+
+datasets:
+  A:
+    name: processed_faces_optimized
+    root: processed_faces_optimized/train
+    real_dir: real
+    fake_dir: fake
+  B:
+    name: processed_faces
+    root: processed_faces/train
+    real_dir: real
+    fake_dir: fake
+
+checkpoints:
+  efficientnet_b0_best:
+    path: training_outputs/best_model.pth
+    architecture: EfficientNetDeepfake
+    enabled: true
+  efficientnet_finetuned:
+    path: model_weights/deepfake_detector_finetuned.pth
+    architecture: EfficientNetDeepfake
+    enabled: true
+
+ensemble:
+  # Named weights for corrected aggregator ablation (must sum conceptually; code normalizes)
+  weights:
+    efficientnet_b0_best: 0.60
+    efficientnet_finetuned: 0.40
+
+calibration:
+  n_bins: 15
+  temperature_init: 1.0
+  temperature_lr: 0.01
+  temperature_steps: 200
+
+paths:
+  manifests_dir: research/manifests
+  outputs_dir: research/outputs
+  figures_dir: research/figures

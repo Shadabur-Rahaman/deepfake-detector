@@ -32,20 +32,21 @@ class LazyModelLoader:
         self._background_loading_active = False
         
     def register_model_loader(self, model_name: str, loader_func: Callable, priority: int = 50):
-        """Register a model loader function with priority"""
+        """Register a model loader function with priority - prevents duplicates"""
         with self._loading_lock:
-            # Check for duplicates
-            if model_name in self._duplicate_check:
+            # Check for duplicates using singleton pattern
+            if model_name in self._registered_models:
                 logger.warning(f"⚠️ Duplicate model registration detected: {model_name}")
                 return False
             
-            self._duplicate_check.add(model_name)
+            self._registered_models.add(model_name)
             self._model_loaders[model_name] = loader_func
             self._model_priorities[model_name] = priority
             
-            # Add to priority queue
-            self._loading_queue.append(model_name)
-            self._loading_queue.sort(key=lambda x: self._model_priorities.get(x, 99))
+            # Add to priority queue (avoid duplicates)
+            if model_name not in self._loading_queue:
+                self._loading_queue.append(model_name)
+                self._loading_queue.sort(key=lambda x: self._model_priorities.get(x, 99))
             
             logger.info(f"✅ Registered lazy loader for {model_name} (priority: {priority})")
             return True

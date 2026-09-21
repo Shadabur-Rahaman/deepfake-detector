@@ -107,46 +107,33 @@ class EnhancedFaceDetector:
                 logger.warning(f"[WARNING] Mediapipe initialization failed: {e}")
     
     def _init_mtcnn(self):
-        """Initialize MTCNN face detection"""
+        """Initialize MTCNN face detection with enhanced error handling"""
         try:
-            from mtcnn import MTCNN
-            self.mtcnn_detector = MTCNN(
-                min_face_size=20,
-                thresholds=[0.6, 0.7, 0.7],
-                factor=0.709
-            )
-            logger.info("[OK] MTCNN face detection initialized")
+            from .enhanced_mtcnn_handler import MTCNN_AVAILABLE, MTCNN_DETECTOR
+            if MTCNN_AVAILABLE and MTCNN_DETECTOR is not None:
+                self.mtcnn_detector = MTCNN_DETECTOR
+                logger.info("[OK] Enhanced MTCNN face detection initialized")
+            else:
+                logger.info("[INFO] Enhanced MTCNN not available - using YOLOv8 and Haar Cascade fallbacks")
         except ImportError:
             # Suppress MTCNN warning completely
             pass
         except Exception as e:
-            logger.warning(f"[WARNING] MTCNN initialization failed: {e}")
+            logger.warning(f"[WARNING] Enhanced MTCNN initialization failed: {e}")
     
     def _init_yolo(self):
-        """Initialize YOLOv8 face detection"""
+        """Initialize YOLOv8 face detection with enhanced error handling"""
         try:
-            from ultralytics import YOLO
-            # Try face-specific model first
-            yolo_paths = [
-                "yolov8n-face.pt",
-                "yolov8n-face-lindevs.pt", 
-                "yolov8n.pt"
-            ]
-            
-            for path in yolo_paths:
-                if os.path.exists(path):
-                    self.yolo_model = YOLO(path)
-                    logger.info(f"[OK] YOLOv8 face detection initialized with {path}")
-                    return
-            
-            # If no local model, try downloading
-            self.yolo_model = YOLO('yolov8n.pt')
-            logger.info("[OK] YOLOv8 face detection initialized with downloaded model")
-            
+            from .enhanced_yolo_handler import YOLO_AVAILABLE, YOLO_MODEL
+            if YOLO_AVAILABLE and YOLO_MODEL is not None:
+                self.yolo_model = YOLO_MODEL
+                logger.info("[OK] Enhanced YOLOv8 face detection initialized")
+            else:
+                logger.warning("[WARNING] Enhanced YOLOv8 not available")
         except ImportError:
-            logger.warning("[WARNING] YOLOv8 not available")
+            logger.warning("[WARNING] Enhanced YOLOv8 not available")
         except Exception as e:
-            logger.warning(f"[WARNING] YOLOv8 initialization failed: {e}")
+            logger.warning(f"[WARNING] Enhanced YOLOv8 initialization failed: {e}")
     
     def _init_haar_cascade(self):
         """Initialize Haar cascade face detection with fallback"""
@@ -558,13 +545,13 @@ class EnhancedDetectionPipeline:
                 probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
                 avg_prob = np.mean(probabilities)
             
-            # Determine result based on probability
-            if avg_prob < 0.5:
+            # Determine result based on probability (FIXED: Match detect_deepfake_in_frames logic)
+            if avg_prob >= 0.5:
                 prediction = "Real Face"
-                confidence = float((1.0 - avg_prob) * 100)
+                confidence = float(avg_prob * 100)
             else:
                 prediction = "Deepfake Detected"
-                confidence = float(avg_prob * 100)
+                confidence = float((1.0 - avg_prob) * 100)
             
             processing_time = (time.time() - start_time) * 1000
             

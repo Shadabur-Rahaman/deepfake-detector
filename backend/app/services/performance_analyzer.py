@@ -1,13 +1,10 @@
 import os
-import logging
 import cv2
 import re
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 import subprocess
 import json
-
-logger = logging.getLogger(__name__)
 
 class PerformanceAnalyzer:
     def __init__(self):

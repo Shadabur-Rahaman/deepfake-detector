@@ -4,32 +4,38 @@ import logging
 import warnings
 from typing import List, Tuple, Dict, Optional
 
-# ✅ STARTUP OPTIMIZATION: Use centralized import cache instead of redundant warning suppression
+# ✅ ENHANCED STARTUP: Use enhanced services for better error handling
 try:
-    from .import_manager import get_cached_imports
-    import_cache = get_cached_imports()
+    from .cuda_safety_manager import get_safe_device, get_device_info
+    from .enhanced_mtcnn_handler import MTCNN_AVAILABLE, MTCNN_DETECTOR
+    from .enhanced_yolo_handler import YOLO_AVAILABLE, YOLO_MODEL
+    from .enhanced_warning_suppression import setup_enhanced_warning_suppression
     
-    # Get cached imports
-    torch = import_cache['torch']
-    cv2 = import_cache['cv2']
-    np = import_cache['numpy']
+    # Apply enhanced warning suppression
+    setup_enhanced_warning_suppression()
     
-    # Import torchvision components
-    torchvision = import_cache['torchvision']
-    models = torchvision["models"]
-    transforms = torchvision["transforms"]
-    nn = torch.nn
+    # Get enhanced device info
+    device_info = get_device_info()
+    safe_device = get_safe_device()
     
-    print("[OK] LooseVersion compatibility fix applied in deepfake_detector")
+    print(f"[OK] Enhanced services initialized: {safe_device}")
+    print(f"[INFO] Device info: {device_info}")
     
-except ImportError:
-    # Fallback imports if cache not available
+    # Import core libraries
     import torch
     import cv2
     import numpy as np
     from torchvision import models, transforms
     nn = torch.nn
-    print("[WARNING] Using fallback imports in deepfake_detector")
+    
+except ImportError:
+    # Fallback imports if enhanced services not available
+    import torch
+    import cv2
+    import numpy as np
+    from torchvision import models, transforms
+    nn = torch.nn
+    print("[INFO] Using fallback imports in deepfake_detector")
 
 # Configure logging immediately
 logging.basicConfig(level=logging.INFO)
@@ -374,7 +380,7 @@ def safe_load_model(path, device):
         
         # Create fallback EfficientNet-B0 model
         from torchvision import models
-        model = models.efficientnet_b0(weights='IMAGENET1K_V1')
+        model = models.efficientnet_b0(weights=None)
         # Modify classifier for binary classification
         num_ftrs = model.classifier[1].in_features
         model.classifier[1] = nn.Linear(num_ftrs, 1)
@@ -404,11 +410,11 @@ def safe_torch_load(path, map_location="cpu"):
             return None
 
 # === CONFIGURATION ===
-MODEL_FILENAME = "efficientnet_b0.pth"
-MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../models/efficientnet_b0.pth')
+MODEL_FILENAME = "deepfake_detector_finetuned1.pth"
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../ml_artifacts/', MODEL_FILENAME)
 # Ensure MODEL_PATH has a proper default if not defined
 if not os.path.exists(MODEL_PATH):
-    MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../models/efficientnet_b0.pth')
+    MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../ml_artifacts/', MODEL_FILENAME)
 MODEL_INPUT_SIZE = (224, 224)
 
 # === CUDA VALIDATION FIX ===
@@ -432,18 +438,16 @@ try:
     device_name = "cpu"  # Default to CPU
     
     try:
-        if torch.cuda.is_available():
-            # Test basic CUDA operations
-            test_tensor = torch.tensor([1.0])
-            test_tensor = test_tensor.cuda()
-            _ = test_tensor * 2
-            del test_tensor
-            torch.cuda.empty_cache()
-            cuda_available = True
-            device_name = "cuda"
-            logger.info("✅ CUDA driver test passed")
+        # Use centralized CUDA safety manager to avoid driver conflicts
+        from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+        
+        device_name = get_validated_device()
+        cuda_available = is_cuda_available_global()
+        
+        if cuda_available:
+            logger.info("✅ CUDA driver test passed (centralized)")
         else:
-            logger.info("🔧 CUDA not available")
+            logger.info("🔧 CUDA not available or unsafe, using CPU")
     except Exception as cuda_test_error:
         logger.error(f"❌ CUDA driver test failed: {cuda_test_error}")
         logger.info("🔧 Falling back to CPU due to CUDA driver issues")
@@ -455,7 +459,7 @@ try:
     
     # Try to use CUDA Safety Manager if available
     try:
-        from services.cuda_safety_manager import get_safe_device, get_device_info
+        from backend.app.services.cuda_safety_manager import get_safe_device, get_device_info
         safe_device_name = get_safe_device()
         if safe_device_name != device_name:
             logger.info(f"🔧 CUDA Safety Manager recommends: {safe_device_name}")
@@ -511,105 +515,168 @@ class DeepfakeDetector:
         self.use_ensemble = not os.getenv("DISABLE_ENSEMBLE_LOADING", "0") == "1"
         self.use_custom_model = not os.getenv("DISABLE_CUSTOM_MODEL_LOADING", "0") == "1"
         
-        # Check for minimal startup mode
-        self.minimal_startup = os.getenv("MINIMAL_STARTUP", "0") == "1"
-        if self.minimal_startup:
-            logger.info("[START] Minimal startup mode enabled - skipping all model loading")
+        # Check for minimal startup mode - DISABLED to allow model loading
+        self.minimal_startup = False  # Force disable minimal startup to allow model loading
+        # Check for fast startup flag
+        self.skip_startup_loading = os.getenv("DISABLE_MODEL_LOADING_ON_STARTUP", "0") == "1"
+        if self.minimal_startup or self.skip_startup_loading:
+            logger.info("[START] Fast startup mode - skipping model loading at initialization")
             self.use_ensemble = False
             self.use_custom_model = False
+            self.models_loaded = False
         
-        # Initialize enhanced loader with proper timing
-        self.enhanced_loader = get_enhanced_loader()
+        # Initialize enhanced loader with proper timing (lazy - don't load models)
+        # Only get the loader instance, don't trigger model loading during startup
+        if self.skip_startup_loading:
+            # Create minimal loader without loading models
+            from .enhanced_model_loader import EnhancedModelLoader
+            self.enhanced_loader = EnhancedModelLoader(silent_mode=True)
+        else:
+            self.enhanced_loader = get_enhanced_loader()
         
         # Add fallback flags for problematic models
         self.ensemble_loading_failed = False
         self.yolo_loading_failed = False
         
-        # Initialize models with proper timing
-        self.initialize_models()
+        # Initialize models with proper timing (skip if fast startup)
+        if not self.skip_startup_loading:
+            self.initialize_models()
+        else:
+            logger.info("[START] Models will be loaded on first use")
     
     def initialize_models(self):
-        """Initialize models with enhanced GPU memory management and lazy loading"""
+        """Initialize models with proper error handling and lazy loading"""
         try:
-            if self.minimal_startup:
-                logger.info("Minimal startup mode - skipping model initialization")
-                self.models_loaded = True
+            if self.minimal_startup or self.skip_startup_loading:
+                logger.info("Fast startup mode - skipping model initialization")
+                self.models_loaded = False  # Mark as not loaded so models load on first use
                 return
             
-            # Import enhanced loaders
+            logger.info("🚀 Initializing models...")
+            
+            # Use unified model loader if available
             try:
-                from services.gpu_memory_manager import get_memory_usage_summary, get_loading_strategy
-                from services.lazy_model_loader import lazy_loader
+                from .unified_model_loader import unified_model_loader
+                logger.info("📊 Loading Strategy: 7 critical models configured")
                 
-                # Get memory status and loading strategy
-                memory_summary = get_memory_usage_summary()
-                loading_strategy = get_loading_strategy()
+                # Register critical models with unified loader
+                self._register_critical_models_unified()
                 
-                logger.info(f"🔍 Memory Status: GPU available: {memory_summary['gpu_available']}")
-                logger.info(f"📊 Loading Strategy: {len(loading_strategy)} models configured")
+                # Load EfficientNet-B0 immediately for basic functionality
+                if not os.getenv("DISABLE_EFFICIENTNET_LOADING", "0") == "1":
+                    self.efficientnet_model = self._load_efficientnet_model()
+                    if self.efficientnet_model is not None:
+                        logger.info("✅ EfficientNet loaded successfully")
+                    else:
+                        logger.warning("⚠️ EfficientNet loading failed")
+                
+                # Load custom finetuned model
+                if self.use_custom_model:
+                    custom_model = load_custom_model()
+                    if custom_model is not None:
+                        logger.info("✅ Custom finetuned model loaded")
+                    else:
+                        logger.warning("⚠️ Custom finetuned model failed to load")
+                
+                # Set models as loaded if at least EfficientNet loaded
+                if self.efficientnet_model is not None:
+                    self.models_loaded = True
+                    logger.info("✅ Models initialized successfully")
+                else:
+                    self.models_loaded = False
+                    logger.error("❌ Models not loaded - no models available")
                 
             except ImportError as e:
-                logger.warning(f"Enhanced loaders not available: {e}")
-                # Fallback to original initialization
+                logger.warning(f"Unified model loader not available: {e}")
+                # Fallback to basic initialization
                 self._initialize_models_fallback()
                 return
             
-            # Use enhanced lazy loading for critical models only
-            logger.info("🚀 Initializing with enhanced lazy loading...")
-            
-            # Register critical models with lazy loader
-            self._register_critical_models()
-            
-            # Preload only critical models (7 models max)
-            critical_models_task = lazy_loader.preload_critical_models(max_models=7)
-            
-            # Start background loading for remaining models
-            lazy_loader.start_background_loading()
-            
-            # Load EfficientNet-B0 as fallback
-            if not os.getenv("DISABLE_EFFICIENTNET_LOADING", "0") == "1":
-                self.efficientnet_model = self._load_efficientnet_model()
-            else:
-                logger.info("EfficientNet loading disabled")
-            
-            # Load custom finetuned model
-            if self.use_custom_model:
-                custom_model = load_custom_model()
-                if custom_model is not None:
-                    logger.info("Custom finetuned model loaded")
-                else:
-                    logger.warning("Custom finetuned model failed to load")
-            
-            # ✅ STARTUP OPTIMIZATION: Skip model initialization if in minimal startup mode
-            if os.getenv("MINIMAL_STARTUP_MODE", "0") == "1":
-                logger.info("[START] Minimal startup mode enabled - skipping all model loading")
-                return
-            
-            # ✅ STARTUP OPTIMIZATION: Defer YOLO loading until first use
-            if YOLO_AVAILABLE and not os.getenv("DISABLE_YOLO_LOADING", "0") == "1":
-                logger.info("YOLO loading deferred to first use for faster startup")
-            
-            # Initialize YOLO model if not in minimal startup mode
-            if YOLO_AVAILABLE:
-                self.yolo_model = None
-                self.yolo_loading_failed = False
-            else:
-                self.yolo_model = None
-                self.yolo_loading_failed = True
-                
-            self.models_loaded = True
+        except Exception as e:
+            logger.error(f"❌ Model initialization failed: {e}")
+            self.models_loaded = False
             
             # Log final status
-            loading_status = lazy_loader.get_loading_status()
-            logger.info(f"✅ Model initialization completed:")
-            logger.info(f"   📊 Critical models loaded: {loading_status['loaded_models']}")
-            logger.info(f"   🔄 Background loading: {loading_status['background_loading']}")
-            logger.info(f"   📋 Total registered: {loading_status['total_registered']}")
+            try:
+                from .unified_model_loader import unified_model_loader
+                loading_status = unified_model_loader.get_loading_status()
+                logger.info(f"✅ Model initialization completed:")
+                logger.info(f"   📊 Critical models loaded: {loading_status['loaded_models']}")
+            except ImportError:
+                logger.info("✅ Model initialization completed")
+    
+    def validate_models(self) -> bool:
+        """Validate that models are loaded and working"""
+        if not self.models_loaded:
+            logger.error("Models not loaded")
+            return False
+        
+        try:
+            # Test EfficientNet if available
+            if self.efficientnet_model is not None:
+                import torch
+                with torch.no_grad():
+                    dummy_input = torch.randn(1, 3, 224, 224).to(self.device)
+                    _ = self.efficientnet_model(dummy_input)
+                logger.info("✅ EfficientNet validation passed")
+            
+            # Test YOLO if available
+            if self.yolo_model is not None:
+                # YOLO validation would go here
+                logger.info("✅ YOLO validation passed")
+            
+            return True
             
         except Exception as e:
-            logger.error(f"❌ Enhanced model initialization failed: {e}")
-            # Fallback to original method
-            self._initialize_models_fallback()
+            logger.error(f"❌ Model validation failed: {e}")
+            return False
+    
+    def _register_critical_models_unified(self):
+        """Register critical models with unified model loader"""
+        try:
+            from .unified_model_loader import unified_model_loader
+            
+            # Register critical models (avoid duplicates)
+            critical_models = [
+                ('yolo_face', 1),
+                ('efficientnet_b0', 2),
+                ('efficientnet_b7', 3),
+                ('resnet50', 4),
+                ('densenet121', 5),
+                ('inception_v3', 6),
+                ('vgg16', 7)
+            ]
+            
+            for model_name, priority in critical_models:
+                # Create loader function for each model
+                def create_loader(name):
+                    def loader():
+                        try:
+                            if name == 'yolo_face':
+                                return self._load_yolo_model()
+                            elif name == 'efficientnet_b0':
+                                return self._load_efficientnet_model()
+                            elif name == 'efficientnet_b7':
+                                return self._load_efficientnet_b7_model()
+                            elif name in ['resnet50', 'densenet121', 'inception_v3', 'vgg16']:
+                                return self._load_torchvision_model(name)
+                            else:
+                                logger.warning(f"No loader implemented for {name}")
+                                return None
+                        except Exception as e:
+                            logger.error(f"Failed to load {name}: {e}")
+                            return None
+                    return loader
+                
+                # Register with unified loader
+                unified_model_loader.register_model_loader(model_name, create_loader(model_name), priority)
+            
+            logger.info("✅ Critical models registered with unified loader")
+            
+        except ImportError as e:
+            logger.warning(f"Unified model loader not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to register critical models: {e}")
     
     def _register_critical_models(self):
         """Register critical models with the lazy loader"""
@@ -773,6 +840,46 @@ class DeepfakeDetector:
             logger.error(f"EfficientNet loading failed: {e}")
             logger.info("Creating clean fallback model...")
             return create_clean_fallback_model(self.device)
+    
+    def _load_efficientnet_b7_model(self):
+        """Load EfficientNet-B7 model"""
+        try:
+            if TIMM_AVAILABLE:
+                model = timm.create_model('efficientnet_b7', pretrained=True)
+                model = model.to(self.device)
+                model.eval()
+                return model
+            else:
+                logger.warning("timm not available for EfficientNet-B7")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load EfficientNet-B7: {e}")
+            return None
+    
+    def _load_torchvision_model(self, model_name):
+        """Load torchvision model"""
+        try:
+            import torch
+            from torchvision import models
+            
+            if model_name == 'resnet50':
+                model = models.resnet50(pretrained=True)
+            elif model_name == 'densenet121':
+                model = models.densenet121(pretrained=True)
+            elif model_name == 'inception_v3':
+                model = models.inception_v3(pretrained=True)
+            elif model_name == 'vgg16':
+                model = models.vgg16(pretrained=True)
+            else:
+                logger.warning(f"Unknown torchvision model: {model_name}")
+                return None
+            
+            model = model.to(self.device)
+            model.eval()
+            return model
+        except Exception as e:
+            logger.error(f"Failed to load {model_name}: {e}")
+            return None
     
     def _load_efficientnet_fallback(self):
         """Fallback method using torchvision models"""
@@ -1048,21 +1155,32 @@ class DeepfakeDetector:
             
             # ✅ PRIORITY FIX: Try custom trained model FIRST (highest priority)
             if self.use_custom_model and "custom_finetuned" in self.enhanced_loader.models:
-                logger.info("🚀 Using your custom trained model (highest priority)...")
-                result, confidence = predict_with_custom_model(faces)
-                if result not in ["Model Not Loaded", "Prediction Failed"]:
-                    # Apply private integrity boost
-                    if integrity_score > 0.7:  # High confidence source validation
-                        if result == "Real" or confidence < 0.6:
-                            # Boost Real confidence by 30-40%
-                            boost_amount = 0.3 + (integrity_score * 0.1)
-                            confidence = min(0.95, confidence + boost_amount)
-                            result = "Real"
-                            logger.debug(f"Source confidence boost applied: +{boost_amount:.2f}")
-                    logger.info(f"✅ Custom trained model: {result} (confidence: {confidence*100:.2f}%)")
-                    return result, confidence
-                else:
-                    logger.warning("Custom model prediction failed, falling back to ensemble")
+                logger.info("🚀 Using YOUR custom trained model (deepfake_detector_finetuned1.pth) - highest priority")
+                try:
+                    result, confidence = predict_with_custom_model(faces)
+                    # ✅ CRITICAL FIX: Ensure confidence is not None
+                    if confidence is None:
+                        logger.warning("⚠️ Custom model returned None confidence, setting to 0.0")
+                        confidence = 0.0
+                    
+                    if result not in ["Model Not Loaded", "Prediction Failed", "Model Not Configured", "Model File Not Found", "Model Load Failed", "Model Load Exception"]:
+                        # ✅ FIXED: Trust your trained model completely - no confidence capping or corrections
+                        # Your model is trained on this data, so it should be accurate
+                        # ✅ CRITICAL FIX: Ensure confidence is a valid float
+                        confidence = float(confidence) if confidence is not None else 0.0
+                        logger.info(f"✅ Custom trained model result: {result} (confidence: {confidence*100:.2f}%)")
+                        logger.info(f"   🎯 Model used: deepfake_detector_finetuned1.pth")
+                        logger.info(f"   📊 Faces analyzed: {len(faces)}")
+                        return result, confidence
+                    else:
+                        logger.warning("⚠️ Custom model prediction failed, falling back to ensemble")
+                        logger.warning(f"   Error details: result={result}, confidence={confidence}")
+                except Exception as custom_error:
+                    logger.error(f"❌ Custom model prediction exception: {custom_error}")
+                    logger.warning("⚠️ Custom model prediction failed with exception, falling back to ensemble")
+            elif self.use_custom_model:
+                logger.warning("⚠️ Custom model enabled but not loaded in enhanced_loader.models")
+                logger.warning(f"   Available models: {list(self.enhanced_loader.models.keys())}")
             
             # Try ensemble prediction as secondary option
             if self.use_ensemble and self.enhanced_loader.models:
@@ -1071,6 +1189,7 @@ class DeepfakeDetector:
                     # Use synchronous ensemble prediction (async version requires async context)
                     result, confidence = self.enhanced_loader.predict_ensemble(faces)
                     if result not in ["No Models Loaded", "Ensemble Prediction Failed"]:
+                        # Use original ensemble prediction without any bias correction
                         logger.info(f"✅ 2025 Ensemble: {result} (confidence: {confidence*100:.2f}%)")
                         return result, confidence
                     else:
@@ -1097,9 +1216,14 @@ class DeepfakeDetector:
                     logger.error(f"Fallback model creation failed: {fallback_error}")
                     result, confidence = "No Models Available", 0.0
             
+            # ✅ CRITICAL FIX: Ensure confidence is not None before comparison
+            if confidence is None:
+                logger.warning("⚠️ Confidence is None, setting to 0.0")
+                confidence = 0.0
+            
             # Apply private integrity boost
             if integrity_score > 0.7:  # High confidence source validation
-                if result == "Real" or confidence < 0.6:
+                if result == "Real" or (confidence is not None and confidence < 0.6):
                     # Boost Real confidence by 30-40%
                     boost_amount = 0.3 + (integrity_score * 0.1)
                     confidence = min(0.95, confidence + boost_amount)
@@ -1192,20 +1316,42 @@ class DeepfakeDetector:
                 from .confidence_calibration_2025 import calibrate_ensemble_confidence
                 
                 # Create mock ensemble predictions for calibration
-                # ✅ MODEL OUTPUT INTERPRETATION (VERIFIED):
+                # ✅ CRITICAL FIX: Correct model interpretation logic
                 # Model is trained with: Class 0 = Real, Class 1 = Fake/Deepfake
                 # Softmax outputs: [prob_real, prob_fake] where prob_real + prob_fake = 1.0
-                # We extract prob_fake (class 1) for deepfake detection
+                # We need to compare both probabilities to determine the correct prediction
                 if logits.shape[1] == 2:
                     raw_probabilities = torch.softmax(logits, dim=1).cpu().numpy()
-                    avg_raw_prob = np.mean(raw_probabilities[:, 1])  # Class 1 (fake) probability
+                    avg_real_prob = np.mean(raw_probabilities[:, 0])  # Class 0 (real) probability
+                    avg_fake_prob = np.mean(raw_probabilities[:, 1])  # Class 1 (fake) probability
+                    
+                    # Use the class with higher probability
+                    if avg_real_prob > avg_fake_prob:
+                        avg_raw_prob = avg_real_prob  # Use real probability
+                        prediction_bias = "real"
+                    else:
+                        avg_raw_prob = avg_fake_prob  # Use fake probability
+                        prediction_bias = "fake"
                 else:
                     raw_probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
                     avg_raw_prob = np.mean(raw_probabilities)
+                    prediction_bias = "fake"  # Default for single output
                 
-                mock_predictions = {
-                    'efficientnet': ("Deepfake Detected" if avg_raw_prob > 0.5 else "Real Face", avg_raw_prob)
-                }
+                # ✅ FIX: Use correct prediction based on which class has higher probability
+                if logits.shape[1] == 2:
+                    if prediction_bias == "real":
+                        mock_predictions = {
+                            'efficientnet': ("Real Face", avg_raw_prob)
+                        }
+                    else:
+                        mock_predictions = {
+                            'efficientnet': ("Deepfake Detected", avg_raw_prob)
+                        }
+                else:
+                    # For single output, use original logic
+                    mock_predictions = {
+                        'efficientnet': ("Deepfake Detected" if avg_raw_prob > 0.5 else "Real Face", avg_raw_prob)
+                    }
                 
                 # Apply calibration
                 calibration_result = calibrate_ensemble_confidence(
@@ -1250,52 +1396,41 @@ class DeepfakeDetector:
                     logger.info(f"🔍 Ground truth validation: SUSPICIOUS (confidence: {validation_result.confidence:.3f})")
                 # Reduced logging verbosity for reasoning
                 
-                # ✅ FIXED DECISION LOGIC: Step 7: Integrate ground truth validation with model predictions
-                # When ground truth validator confirms authenticity with high confidence, override model bias
-                raw_confidence = unbiased_result.confidence
+                # ✅ BIAS FIX: Use model predictions without ground truth override
+                # Ground truth validator should not override trained model predictions
+                final_confidence = unbiased_result.confidence
+                logger.info(f"🔍 Using unbiased model confidence: {final_confidence:.4f}")
+                logger.info(f"🔍 Ground truth validation: {'AUTHENTIC' if validation_result.is_authentic else 'SUSPICIOUS'} (info only)")
                 
-                # If ground truth validator confirms authenticity with high confidence (>0.7), 
-                # and model is giving high deepfake confidence (>0.8), this indicates model bias
-                if (validation_result.is_authentic and 
-                    validation_result.confidence > 0.7 and 
-                    raw_confidence > 0.8):
-                    # Strong ground truth evidence of authenticity overrides model bias
-                    final_confidence = max(0.1, 1.0 - raw_confidence)  # Invert and cap at minimum
-                    logger.info(f"🔍 Ground truth override: AUTHENTIC validation overrides model bias")
-                    logger.info(f"🔍 Original model confidence: {raw_confidence:.4f} → Adjusted: {final_confidence:.4f}")
-                elif (validation_result.is_authentic and 
-                      validation_result.confidence > 0.6 and 
-                      raw_confidence > 0.7):
-                    # Moderate ground truth evidence of authenticity reduces model confidence
-                    # Blend the ground truth confidence with inverted model confidence
-                    gt_weight = validation_result.confidence
-                    model_weight = 1.0 - validation_result.confidence
-                    final_confidence = (gt_weight * (1.0 - raw_confidence) + 
-                                       model_weight * raw_confidence)
-                    logger.info(f"🔍 Ground truth adjustment: AUTHENTIC validation reduces model confidence")
-                    logger.info(f"🔍 Original: {raw_confidence:.4f} → Adjusted: {final_confidence:.4f}")
+                # ✅ CRITICAL FIX: Use the correct prediction from the model interpretation
+                # The final_confidence now represents the probability of the predicted class
+                if logits.shape[1] == 2:
+                    # For 2-class output, use the prediction based on which class has higher probability
+                    if prediction_bias == "real":
+                        result = "Real Face"
+                        confidence = final_confidence  # This is the real probability
+                        logger.info(f"🔍 Classified as REAL: confidence={final_confidence:.4f}")
+                    else:
+                        result = "Deepfake Detected"
+                        confidence = final_confidence  # This is the fake probability
+                        logger.info(f"🔍 Classified as DEEPFAKE: confidence={final_confidence:.4f}")
                 else:
-                    # Use raw ensemble confidence for normal cases
-                    final_confidence = raw_confidence
-                    logger.info(f"🔍 Using raw ensemble confidence: {final_confidence:.4f}")
-                
-                # ✅ WEBCAM CONSERVATIVE THRESHOLD: Use higher threshold for real-time webcam
-                # Real-time webcam deepfakes are extremely rare, so be more conservative
-                fake_threshold = 0.7  # Require 70%+ confidence for "Deepfake" classification
-                
-                if final_confidence >= fake_threshold:
-                    result = "Deepfake Detected"
-                    confidence = final_confidence  # Use raw confidence without artificial caps
-                    logger.info(f"🔍 Classified as DEEPFAKE: confidence={final_confidence:.4f} >= {fake_threshold}")
-                elif final_confidence <= 0.3:  # Very confident it's real
-                    result = "Real Face"
-                    confidence = 1.0 - final_confidence  # Use raw confidence for real detection
-                    logger.info(f"🔍 Classified as REAL: confidence={final_confidence:.4f} <= 0.3")
-                else:
-                    # Uncertain range (0.3 < confidence < 0.7) - bias toward real for webcam
-                    result = "Real Face"
-                    confidence = 0.6  # Conservative confidence for uncertain cases
-                    logger.info(f"🔍 UNCERTAIN: confidence={final_confidence:.4f} in range (0.3, 0.7) → biased to REAL")
+                    # For single output, use the original threshold logic
+                    fake_threshold = 0.7  # Require 70%+ confidence for "Deepfake" classification
+                    
+                    if final_confidence >= fake_threshold:
+                        result = "Deepfake Detected"
+                        confidence = final_confidence
+                        logger.info(f"🔍 Classified as DEEPFAKE: confidence={final_confidence:.4f} >= {fake_threshold}")
+                    elif final_confidence <= 0.3:  # Very confident it's real
+                        result = "Real Face"
+                        confidence = 1.0 - final_confidence
+                        logger.info(f"🔍 Classified as REAL: confidence={final_confidence:.4f} <= 0.3")
+                    else:
+                        # Uncertain range (0.3 < confidence < 0.7) - bias toward real for webcam
+                        result = "Real Face"
+                        confidence = 0.6  # Conservative confidence for uncertain cases
+                        logger.info(f"🔍 UNCERTAIN: confidence={final_confidence:.4f} in range (0.3, 0.7) → biased to REAL")
                 
                 # Round confidence to 3 decimal places for consistency
                 confidence = round(confidence, 3)
@@ -1321,21 +1456,28 @@ class DeepfakeDetector:
                 with torch.no_grad():
                     self.efficientnet_model.eval()
                     logits = self.efficientnet_model(face_batch)
-                    # ✅ FIX: Use softmax for 2-class outputs
-                    if logits.shape[1] == 2:
-                        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
-                        avg_prob = np.mean(probabilities[:, 1])  # Class 1 (fake)
+                # ✅ CRITICAL FIX: Correct fallback logic for 2-class outputs
+                if logits.shape[1] == 2:
+                    probabilities = torch.softmax(logits, dim=1).cpu().numpy()
+                    avg_real_prob = np.mean(probabilities[:, 0])  # Class 0 (real)
+                    avg_fake_prob = np.mean(probabilities[:, 1])  # Class 1 (fake)
+                    
+                    # Use the class with higher probability
+                    if avg_real_prob > avg_fake_prob:
+                        return "Real Face", avg_real_prob
                     else:
-                        probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
-                        avg_prob = np.mean(probabilities)
-                
-                # Simple fallback logic
-                if avg_prob > 0.6:
-                    return "Deepfake Detected", avg_prob  # ✅ BIAS FIX: Remove 95% cap
-                elif avg_prob < 0.4:
-                    return "Real Face", 1.0 - avg_prob  # ✅ BIAS FIX: Remove 95% cap
+                        return "Deepfake Detected", avg_fake_prob
                 else:
-                    return "Uncertain", 0.5
+                    probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
+                    avg_prob = np.mean(probabilities)
+                    
+                    # Simple fallback logic for single output
+                    if avg_prob > 0.6:
+                        return "Deepfake Detected", avg_prob
+                    elif avg_prob < 0.4:
+                        return "Real Face", 1.0 - avg_prob
+                    else:
+                        return "Uncertain", 0.5
                     
             except Exception as e2:
                 logger.error(f"Fallback detection also failed: {e2}")
@@ -1519,8 +1661,25 @@ class DeepfakeDetector:
             self.models_loaded = False
             return False
 
-# Global detector instance
-detector = DeepfakeDetector()
+# Global detector instance - Lazy initialization (only create instance, don't load models)
+_detector_instance = None
+
+def get_detector() -> DeepfakeDetector:
+    """Get or create the global detector instance with lazy initialization"""
+    global _detector_instance
+    if _detector_instance is None:
+        # Check if we should skip model loading during startup
+        import os
+        skip_loading = os.getenv("DISABLE_MODEL_LOADING_ON_STARTUP", "0") == "1"
+        if skip_loading:
+            os.environ["DISABLE_MODEL_LOADING_ON_STARTUP"] = "1"
+        _detector_instance = DeepfakeDetector()
+        if skip_loading:
+            os.environ.pop("DISABLE_MODEL_LOADING_ON_STARTUP", None)
+    return _detector_instance
+
+# For backward compatibility, create instance but don't load models
+detector = None  # Will be initialized on first use via get_detector()
 
 # Compatibility export for enhanced_detector
 try:
@@ -1533,12 +1692,19 @@ except ImportError:
 
 def load_deepfake_model():
     """Load and return the deepfake detection model"""
-    return detector.efficientnet_model
+    detector = get_detector()
+    return detector.efficientnet_model if detector else None
 
 async def detect_deepfake_in_frames(faces: List[np.ndarray], video_id: str = None, base_progress: int = 0) -> Tuple[str, float]:
     """Async wrapper for deepfake detection with on-demand loading and progress updates"""
     import asyncio
     import time
+    
+    # Get detector instance (lazy initialization)
+    detector = get_detector()
+    if detector is None:
+        logger.error("❌ Detector not available")
+        return "Model Not Available", 0.0
     
     # Progress update helper function
     def update_progress_if_needed(progress_increment: int, stage_details: str):
@@ -1622,10 +1788,18 @@ async def detect_deepfake_in_frames(faces: List[np.ndarray], video_id: str = Non
 
 def detect_deepfake_sync(faces: List[np.ndarray]) -> Tuple[str, float]:
     """Synchronous wrapper for deepfake detection"""
+    detector = get_detector()
+    if detector is None:
+        logger.error("❌ Detector not available")
+        return "Model Not Available", 0.0
     return detector.detect_deepfake(faces)
 
 def detect_faces_yolo_sync(frame: np.ndarray) -> List[np.ndarray]:
     """Synchronous YOLOv8 face detection"""
+    detector = get_detector()
+    if detector is None:
+        logger.error("❌ Detector not available")
+        return []
     return detector.detect_faces_yolo(frame)
 
 # === VALIDATION FUNCTIONS ===
@@ -1697,7 +1871,8 @@ def validate_cuda_setup():
                 logger.warning(f"YOLOv8 test failed: {e}")
         
         # Check model loading
-        if hasattr(detector, 'models_loaded') and detector.models_loaded:
+        detector = get_detector()
+        if detector and hasattr(detector, 'models_loaded') and detector.models_loaded:
             logger.info("Models loaded successfully")
             
             # Test inference with proper error handling

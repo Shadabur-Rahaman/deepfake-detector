@@ -9,6 +9,7 @@ import { PaymentProvider } from "./contexts/PaymentContext";
 import { NavigationProvider } from "./contexts/NavigationContext";
 import { WelcomePopupProvider } from "./contexts/WelcomePopupContext";
 import { AdminNotificationProvider } from "./contexts/AdminNotificationContext";
+import { EnhancedNotificationProvider } from "./contexts/EnhancedNotificationContext";
 import { RealtimeProvider } from "./contexts/RealtimeContext";
 
 // UI Components
@@ -38,6 +39,7 @@ import WebSocketGuide from "./pages/WebSocketGuide";
 import ModelInformation from "./pages/ModelInformation";
 
 import './App.css';
+// import SuperAdvancedDetection from './components/SuperAdvancedDetection';
 
 // Error Fallback
 const ErrorFallback = ({ error, resetErrorBoundary }: { error: Error; resetErrorBoundary: () => void }) => (
@@ -65,7 +67,8 @@ function App() {
             <AuthProvider>
               <RealtimeProvider>
                 <AdminNotificationProvider>
-                  <PaymentProvider>
+                  <EnhancedNotificationProvider>
+                    <PaymentProvider>
                   {/* ✅ Add future flags to suppress warnings */}
                   <Router 
                     future={{ 
@@ -87,7 +90,9 @@ function App() {
                             <Route path="/" element={<PageLayout><Index /></PageLayout>} />
                             <Route path="/try" element={<PageLayout><TryIt /></PageLayout>} />
                             <Route path="/detection" element={<PageLayout><Detection /></PageLayout>} />
+                            {/* <Route path="/super-advanced" element={<PageLayout><SuperAdvancedDetection /></PageLayout>} /> */}
                             <Route path="/admin" element={<AdminDashboard />} />
+                            <Route path="/admin/legacy" element={<AdminDashboard />} />
                             <Route path="/auth-test" element={<PageLayout><AuthTest /></PageLayout>} />
                             <Route path="/features" element={<PageLayout><Features /></PageLayout>} />
                             <Route path="/api" element={<PageLayout><ApiDocs /></PageLayout>} />
@@ -111,6 +116,7 @@ function App() {
                     </div>
                   </Router>
                   </PaymentProvider>
+                  </EnhancedNotificationProvider>
                 </AdminNotificationProvider>
               </RealtimeProvider>
             </AuthProvider>

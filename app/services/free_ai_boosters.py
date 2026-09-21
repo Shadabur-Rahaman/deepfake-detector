@@ -14,16 +14,15 @@ class FreeAIEnsemble:
 
     def __init__(self):
         self.models = {}
-        # PRODUCTION: Heavily favor your trained EfficientNet
+        # BALANCED: Fair weights for unbiased detection
         self.weights = {
-            'efficientnet': 0.80,    # Primary model - increased weight
-            'frequency_analysis': 0.20,  # Simple supplementary analysis only
-            # REMOVED: Problematic Hugging Face model completely
+            'efficientnet': 0.70,    # Primary model
+            'frequency_analysis': 0.30,  # Supplementary analysis
         }
         self.models_loaded = False
-        # PRODUCTION: Real-content optimized thresholds
-        self.real_threshold = 0.25  # Very low threshold = classify as real easily
-        self.confidence_boost = 1.25  # Heavy boost for real predictions
+        # BALANCED: Fair thresholds for unbiased detection
+        self.real_threshold = 0.5  # Balanced threshold
+        self.confidence_boost = 1.0  # No artificial boosting
 
     async def ultra_analyze_faces(self, faces: List[torch.Tensor], 
                                 video_path: Optional[str] = None) -> Dict:
@@ -35,20 +34,16 @@ class FreeAIEnsemble:
 
         # 1. PRIMARY: Your EfficientNet (most reliable)
         try:
-            from backend.app.services.deepfake_detector import detect_deepfake_in_frames
+            from app.services.deepfake_detector import detect_deepfake_in_frames
             efficientnet_pred, efficientnet_conf = await detect_deepfake_in_frames(faces)
             
-            # PRODUCTION: Heavy bias toward real content
+            # BALANCED: Fair processing without bias
             if isinstance(efficientnet_conf, (int, float)):
                 if efficientnet_conf > 1.0:
                     efficientnet_conf = efficientnet_conf / 100.0
                     
-                # AGGRESSIVE real content boosting
-                if 'Real' in str(efficientnet_pred):
-                    boosted_conf = min(efficientnet_conf * self.confidence_boost, 0.98)
-                else:
-                    # For deepfake predictions, be more conservative
-                    boosted_conf = max(efficientnet_conf * 0.75, 0.02)
+                # BALANCED: No artificial boosting
+                boosted_conf = efficientnet_conf
                     
             results['efficientnet'] = {
                 'prediction': efficientnet_pred,
@@ -59,10 +54,10 @@ class FreeAIEnsemble:
             
         except Exception as e:
             logger.warning(f"EfficientNet analysis failed: {e}")
-            # PRODUCTION: Conservative fallback heavily favoring real
+            # BALANCED: Neutral fallback
             results['efficientnet'] = {
-                'prediction': 'Real Video',
-                'confidence': 0.85,  # High confidence fallback
+                'prediction': 'Analysis Failed',
+                'confidence': 0.5,  # Neutral confidence fallback
                 'weight': self.weights['efficientnet']
             }
 
@@ -76,7 +71,7 @@ class FreeAIEnsemble:
         except Exception as e:
             logger.warning(f"Frequency analysis failed: {e}")
             results['frequency'] = {
-                'score': 0.85,  # High real bias fallback
+                'score': 0.5,  # Neutral fallback
                 'weight': self.weights['frequency_analysis']
             }
 
@@ -94,10 +89,10 @@ class FreeAIEnsemble:
         }
 
     def _production_frequency_analysis(self, faces: List[torch.Tensor]) -> float:
-        """Production-ready frequency analysis heavily biased toward real"""
+        """Balanced frequency analysis for unbiased detection"""
         try:
             if len(faces) < 2:
-                return 0.85  # High real bias
+                return 0.5  # Neutral bias
 
             artifact_scores = []
             for face in faces[:3]:  # Process fewer faces for stability
@@ -124,52 +119,54 @@ class FreeAIEnsemble:
                         
                         high_freq_ratio = high_freq_energy / (total_energy + 1e-10)
 
-                        # PRODUCTION: Only flag extreme cases as suspicious
-                        if high_freq_ratio < 0.005:  # Extremely suspicious (very rare)
-                            artifact_scores.append(0.40)  # Still moderate suspicion
-                        elif high_freq_ratio < 0.02:  # Moderately suspicious
-                            artifact_scores.append(0.70)  # Low suspicion
+                        # BALANCED: Fair artifact detection based on actual analysis
+                        if high_freq_ratio < 0.01:  # Very suspicious (likely deepfake)
+                            artifact_scores.append(0.2)  # Low real confidence
+                        elif high_freq_ratio < 0.03:  # Suspicious
+                            artifact_scores.append(0.4)  # Moderate real confidence
+                        elif high_freq_ratio < 0.05:  # Somewhat suspicious
+                            artifact_scores.append(0.6)  # Moderate real confidence
                         else:
-                            artifact_scores.append(0.90)  # High confidence in real
+                            artifact_scores.append(0.8)  # High real confidence
 
                 except Exception:
-                    artifact_scores.append(0.85)  # High real bias on error
+                    artifact_scores.append(0.5)  # Neutral on error
 
-            return np.mean(artifact_scores) if artifact_scores else 0.85
+            return np.mean(artifact_scores) if artifact_scores else 0.5
 
         except Exception as e:
-            logger.warning(f"Production frequency analysis error: {e}")
-            return 0.85  # High real bias
+            logger.warning(f"Frequency analysis error: {e}")
+            return 0.5  # Neutral fallback
 
     def _production_ensemble_decision(self, results: Dict) -> Dict:
-        """Production ensemble heavily optimized for real content"""
+        """Balanced ensemble decision without bias"""
         total_real_score = 0.0
         total_weight = 0.0
 
-        logger.info(f"🔍 PRODUCTION ENSEMBLE: Processing {len(results)} models")
+        logger.info(f"🔍 BALANCED ENSEMBLE: Processing {len(results)} models")
 
         for model_name, result in results.items():
             try:
                 if isinstance(result, dict):
                     if 'prediction' in result:
                         pred = result['prediction']
-                        conf = result.get('confidence', 0.8)
+                        conf = result.get('confidence', 0.5)
                         weight = result.get('weight', 0.1)
 
                         if isinstance(conf, (int, float)):
                             if conf > 1.0:
                                 conf = conf / 100.0
 
-                            # PRODUCTION: Aggressive real content bias
+                            # BALANCED: Fair processing without bias
                             if 'Real' in str(pred):
-                                real_score = min(conf * 1.4, 0.98)  # Heavy boost for real
+                                real_score = conf  # No artificial boost
                             else:
-                                real_score = max(1.0 - conf * 1.3, 0.02)  # Heavy reduction for fake
+                                real_score = 1.0 - conf  # Fair conversion
                         else:
-                            real_score = 0.85  # High real bias default
+                            real_score = 0.5  # Neutral default
                     else:
-                        # Handle score-based results with heavy real bias
-                        real_score = min(result.get('score', 0.85) * 1.3, 0.98)
+                        # Handle score-based results fairly
+                        real_score = result.get('score', 0.5)
                         weight = result.get('weight', 0.1)
 
                     logger.info(f"  {model_name}: real_score={real_score:.3f}, weight={weight:.3f}")
@@ -178,33 +175,27 @@ class FreeAIEnsemble:
 
             except Exception as e:
                 logger.warning(f"Error processing {model_name}: {e}")
-                # PRODUCTION: High real bias fallback
-                total_real_score += 0.85 * 0.1
+                # BALANCED: Neutral fallback
+                total_real_score += 0.5 * 0.1
                 total_weight += 0.1
 
-        # PRODUCTION: Final decision with heavy real bias
+        # BALANCED: Final decision without bias
         if total_weight > 0:
             final_real_score = total_real_score / total_weight
         else:
-            final_real_score = 0.85  # High real bias default
+            final_real_score = 0.5  # Neutral default
 
-        # Apply production-level boosting toward real
-        final_real_score = min(final_real_score * 1.15, 0.98)  # 15% boost toward real
+        # No artificial boosting
+        logger.info(f"🎯 BALANCED RESULT: final_real_score={final_real_score:.3f}")
 
-        logger.info(f"🎯 PRODUCTION RESULT: final_real_score={final_real_score:.3f}")
-
-        if final_real_score >= self.real_threshold:  # Very low threshold (0.25)
+        if final_real_score >= self.real_threshold:  # Balanced threshold (0.5)
             prediction = "Real Video"
-            confidence = min(final_real_score * 100, 98.0)
+            confidence = final_real_score * 100
         else:
             prediction = "Deepfake Detected"  
-            confidence = max((1.0 - final_real_score) * 100, 65.0)
+            confidence = (1.0 - final_real_score) * 100
 
-        # PRODUCTION: Ensure real content gets high confidence
-        if prediction == "Real Video" and confidence < 75.0:
-            confidence = 75.0 + (confidence - 50.0) * 0.5  # Boost low real confidence
-
-        logger.info(f"✅ PRODUCTION DECISION: {prediction} (confidence: {confidence:.1f}%)")
+        logger.info(f"✅ BALANCED DECISION: {prediction} (confidence: {confidence:.1f}%)")
 
         return {
             'prediction': prediction,

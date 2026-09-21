@@ -64,12 +64,20 @@ def check_cuda_availability() -> Dict[str, Any]:
     
     try:
         import torch
-        if torch.cuda.is_available():
-            cuda_status["available"] = True
-            cuda_status["device_name"] = torch.cuda.get_device_name(0)
-            cuda_status["cuda_version"] = torch.version.cuda
-            cuda_status["memory_gb"] = torch.cuda.get_device_properties(0).total_memory / 1e9
-            print(f"[INFO] CUDA available: {cuda_status['cuda_version']}, GPU: {cuda_status['device_name']}")
+        # Check if CUDA is disabled by environment variables
+        if os.environ.get("CUDA_VISIBLE_DEVICES") == "" or os.environ.get("FORCE_CPU_MODE") == "1":
+            print("[INFO] CUDA disabled by environment variables, using CPU")
+            cuda_status["available"] = False
+        elif torch.cuda.is_available():
+            try:
+                cuda_status["available"] = True
+                cuda_status["device_name"] = torch.cuda.get_device_name(0)
+                cuda_status["cuda_version"] = torch.version.cuda
+                cuda_status["memory_gb"] = torch.cuda.get_device_properties(0).total_memory / 1e9
+                print(f"[INFO] CUDA available: {cuda_status['cuda_version']}, GPU: {cuda_status['device_name']}")
+            except (AssertionError, RuntimeError) as e:
+                print(f"[WARNING] CUDA device access failed: {e}, using CPU")
+                cuda_status["available"] = False
         else:
             print("[WARNING] CUDA not detected, running on CPU")
     except ImportError:
@@ -206,6 +214,32 @@ def load_model_with_fallback(model_path: str, device: str = "cpu") -> Optional[A
 def initialize_imports_once():
     """Initialize all imports once and cache them"""
     with _import_lock:
+        # Check if import cache is disabled
+        if os.environ.get("DISABLE_IMPORT_CACHE", "0") == "1":
+            print("[INFO] Import cache disabled by environment variable")
+            # Import numpy directly to ensure it's available
+            try:
+                import numpy as np
+                return {
+                    'torch': True,
+                    'yolo': False,
+                    'torchvision': True,
+                    'opencv': True,
+                    'numpy': np,
+                    'cuda': {'available': False, 'device_name': None, 'cuda_version': None, 'memory_gb': None},
+                    'initialized': True
+                }
+            except ImportError:
+                return {
+                    'torch': True,
+                    'yolo': False,
+                    'torchvision': True,
+                    'opencv': True,
+                    'numpy': None,
+                    'cuda': {'available': False, 'device_name': None, 'cuda_version': None, 'memory_gb': None},
+                    'initialized': True
+                }
+        
         if _IMPORT_CACHE['initialized']:
             return _IMPORT_CACHE
         

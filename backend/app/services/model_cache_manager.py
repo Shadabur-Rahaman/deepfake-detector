@@ -33,17 +33,19 @@ class ModelCacheManager:
         """Get optimal device for model loading"""
         try:
             # Use CUDA Safety Manager if available
-            from services.cuda_safety_manager import get_safe_device
+            from backend.app.services.cuda_safety_manager import get_safe_device
             return get_safe_device()
         except ImportError:
             # Fallback device detection
             if torch.cuda.is_available():
                 try:
-                    # Test CUDA with small operation
-                    test_tensor = torch.tensor([1.0]).cuda()
-                    del test_tensor
-                    torch.cuda.empty_cache()
-                    return "cuda"
+                    # Use centralized CUDA safety manager to avoid driver conflicts
+                    from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                    
+                    if is_cuda_available_global():
+                        return get_validated_device()
+                    else:
+                        return "cpu"
                 except Exception:
                     return "cpu"
             return "cpu"

@@ -41,8 +41,7 @@ class SophisticatedEfficientNetLoader:
         try:
             # Check for force CPU mode first
             if (os.environ.get("FORCE_CPU_MODE", "0") == "1" or 
-                os.environ.get("CUDA_VISIBLE_DEVICES", "") == "" or
-                os.environ.get("MINIMAL_STARTUP_MODE", "0") == "1"):
+                os.environ.get("CUDA_VISIBLE_DEVICES", "") == ""):
                 logger.info("🔧 Force CPU mode detected, skipping CUDA initialization")
                 self.device = "cpu"
                 return
@@ -53,14 +52,16 @@ class SophisticatedEfficientNetLoader:
                 self.device = "cpu"
                 return
             
-            # Test CUDA driver with safety checks
+            # Use centralized CUDA safety manager to avoid driver conflicts
             try:
-                # Test basic CUDA operations
-                test_tensor = torch.tensor([1.0]).cuda()
-                _ = test_tensor * 2
-                del test_tensor
-                torch.cuda.empty_cache()
-                logger.info("✅ CUDA driver test passed")
+                from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                
+                if is_cuda_available_global():
+                    self.device = get_validated_device()
+                    logger.info("✅ CUDA driver test passed (centralized)")
+                else:
+                    self.device = "cpu"
+                    logger.info("🔧 CUDA not available or unsafe, using CPU")
             except Exception as cuda_test_error:
                 logger.error(f"❌ CUDA driver test failed: {cuda_test_error}")
                 logger.info("🔧 Falling back to CPU mode due to CUDA driver issues")
@@ -200,7 +201,7 @@ class SophisticatedEfficientNetLoader:
             logger.info("📦 Loading with torchvision + finetuned weights...")
             
             # Create EfficientNet-B0 with ImageNet pretrained weights
-            model = models.efficientnet_b0(weights='IMAGENET1K_V1')
+            model = models.efficientnet_b0(weights=None)
             
             # Modify classifier for binary classification
             num_features = model.classifier[1].in_features
@@ -248,7 +249,7 @@ class SophisticatedEfficientNetLoader:
             logger.info("📦 Loading with torchvision pretrained weights...")
             
             # Create EfficientNet-B0 with ImageNet weights
-            model = models.efficientnet_b0(weights='IMAGENET1K_V1')
+            model = models.efficientnet_b0(weights=None)
             
             # Modify classifier for binary classification
             num_features = model.classifier[1].in_features

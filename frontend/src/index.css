@@ -282,6 +282,11 @@
     @apply bg-border rounded-full;
   }
 
+  /* Hide horizontal scrollbar corner (bottom-right corner where scrollbars meet) */
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground;
   }

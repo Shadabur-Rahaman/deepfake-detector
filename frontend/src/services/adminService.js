@@ -3,6 +3,8 @@
  * Handles all admin-related operations including user management, system monitoring, and contact requests
  */
 
+import mockBackend from './mockBackend';
+
 class AdminService {
   constructor() {
     this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -12,6 +14,12 @@ class AdminService {
     this.maxReconnectAttempts = 5;
     this.listeners = new Map();
     this.isConnected = false;
+    this.useMockBackend = process.env.NODE_ENV === 'development' || !process.env.REACT_APP_API_URL;
+    
+    // Start mock backend simulation in development
+    if (this.useMockBackend) {
+      mockBackend.simulateRealtimeUpdates();
+    }
   }
 
   // WebSocket Connection Management
@@ -159,14 +167,23 @@ class AdminService {
 
   // System Health & Monitoring
   async getSystemHealth() {
+    if (this.useMockBackend) {
+      return await mockBackend.getSystemHealth();
+    }
     return await this.makeRequest('/admin/system/health');
   }
 
   async getSystemStats() {
+    if (this.useMockBackend) {
+      return await mockBackend.getSystemStats();
+    }
     return await this.makeRequest('/admin/system/stats');
   }
 
   async refreshSystemData() {
+    if (this.useMockBackend) {
+      return await mockBackend.refreshSystemData();
+    }
     const [health, stats] = await Promise.all([
       this.getSystemHealth(),
       this.getSystemStats()
@@ -199,10 +216,16 @@ class AdminService {
 
   // Contact Requests Management
   async getContactRequests() {
+    if (this.useMockBackend) {
+      return await mockBackend.getContactRequests();
+    }
     return await this.makeRequest('/admin/contact-requests');
   }
 
   async updateContactRequest(requestId, status, adminNotes) {
+    if (this.useMockBackend) {
+      return await mockBackend.updateContactRequest(requestId, status, adminNotes);
+    }
     return await this.makeRequest(`/admin/contact-requests/${requestId}`, {
       method: 'PUT',
       body: JSON.stringify({ status, adminNotes })
@@ -210,6 +233,9 @@ class AdminService {
   }
 
   async deleteContactRequest(requestId) {
+    if (this.useMockBackend) {
+      return await mockBackend.deleteContactRequest(requestId);
+    }
     return await this.makeRequest(`/admin/contact-requests/${requestId}`, {
       method: 'DELETE'
     });
@@ -217,10 +243,16 @@ class AdminService {
 
   // Auth Requests Management
   async getAuthRequests() {
+    if (this.useMockBackend) {
+      return await mockBackend.getAuthRequests();
+    }
     return await this.makeRequest('/admin/auth-requests');
   }
 
   async approveAuthRequest(requestId, adminNotes) {
+    if (this.useMockBackend) {
+      return await mockBackend.approveAuthRequest(requestId, adminNotes);
+    }
     return await this.makeRequest(`/admin/auth-requests/${requestId}/approve`, {
       method: 'POST',
       body: JSON.stringify({ adminNotes })
@@ -228,6 +260,9 @@ class AdminService {
   }
 
   async rejectAuthRequest(requestId, adminNotes) {
+    if (this.useMockBackend) {
+      return await mockBackend.rejectAuthRequest(requestId, adminNotes);
+    }
     return await this.makeRequest(`/admin/auth-requests/${requestId}/reject`, {
       method: 'POST',
       body: JSON.stringify({ adminNotes })
@@ -236,10 +271,16 @@ class AdminService {
 
   // System Settings
   async getSystemSettings() {
+    if (this.useMockBackend) {
+      return await mockBackend.getSystemSettings();
+    }
     return await this.makeRequest('/admin/settings');
   }
 
   async updateSystemSettings(settings) {
+    if (this.useMockBackend) {
+      return await mockBackend.updateSystemSettings(settings);
+    }
     return await this.makeRequest('/admin/settings', {
       method: 'PUT',
       body: JSON.stringify(settings)
@@ -248,10 +289,16 @@ class AdminService {
 
   // Access Control Settings
   async getAccessControlSettings() {
+    if (this.useMockBackend) {
+      return await mockBackend.getAccessControlSettings();
+    }
     return await this.makeRequest('/admin/access-control');
   }
 
   async updateAccessControlSettings(settings) {
+    if (this.useMockBackend) {
+      return await mockBackend.updateAccessControlSettings(settings);
+    }
     return await this.makeRequest('/admin/access-control', {
       method: 'PUT',
       body: JSON.stringify(settings)
@@ -260,10 +307,16 @@ class AdminService {
 
   // Email Notification Settings
   async getEmailSettings() {
+    if (this.useMockBackend) {
+      return await mockBackend.getEmailSettings();
+    }
     return await this.makeRequest('/admin/email-settings');
   }
 
   async updateEmailSettings(settings) {
+    if (this.useMockBackend) {
+      return await mockBackend.updateEmailSettings(settings);
+    }
     return await this.makeRequest('/admin/email-settings', {
       method: 'PUT',
       body: JSON.stringify(settings)
@@ -272,6 +325,9 @@ class AdminService {
 
   // Test Email
   async testEmailConfiguration() {
+    if (this.useMockBackend) {
+      return await mockBackend.testEmailConfiguration();
+    }
     return await this.makeRequest('/admin/email-settings/test', {
       method: 'POST'
     });

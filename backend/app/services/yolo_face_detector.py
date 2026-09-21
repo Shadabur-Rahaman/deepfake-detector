@@ -15,7 +15,7 @@ except ImportError:
     from ultralytics import YOLO
     print("[WARNING] Using fallback YOLO import")
 
-CONF_THR = 0.70   # keep high for precision
+CONF_THR = 0.40   # ✅ FIXED: Lower threshold to detect more faces
 # Use relative path for better portability
 MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "yolov8n-face.pt")
 class YOLOv8Face:

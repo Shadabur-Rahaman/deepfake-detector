@@ -21,7 +21,8 @@ except ImportError:
 
 # Setup path to advanced models
 try:
-    from app.utils.model_importer import MODEL_AVAILABILITY
+    from backend.app.utils.model_importer import get_model_availability_cached
+    MODEL_AVAILABILITY = get_model_availability_cached()
 except ImportError:
     MODEL_AVAILABILITY = {'yolov8': False}
 

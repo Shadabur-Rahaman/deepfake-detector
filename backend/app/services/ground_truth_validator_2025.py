@@ -137,9 +137,9 @@ class GroundTruthValidator2025:
             else:
                 overall_authentic_score = 0.5  # Neutral if no validations
             
-            # ✅ BIAS FIX: More balanced threshold that doesn't override model predictions
-            # Use lenient threshold since this is for information only, not final decision
-            is_authentic = overall_authentic_score >= 0.4  # More lenient threshold for info-only validation
+            # ✅ BIAS FIX: Balanced threshold for proper deepfake detection
+            # Use standard threshold for accurate validation
+            is_authentic = overall_authentic_score >= 0.5  # Standard threshold for proper detection
             
             # Generate reasoning
             reasoning = self._generate_reasoning(validation_results, overall_authentic_score)
@@ -184,13 +184,13 @@ class GroundTruthValidator2025:
         """Validate natural motion patterns in face sequence"""
         try:
             if len(faces) < 3:
-                # ✅ JARVIS FIX: Be more lenient for insufficient frames - default to authentic
+                # ✅ BIAS FIX: Neutral default for insufficient frames
                 return ValidationResult(
-                    is_authentic=True,  # ✅ JARVIS FIX: Default to authentic for insufficient frames
-                    confidence=0.6,    # ✅ JARVIS FIX: Reasonable default confidence
+                    is_authentic=False,  # ✅ BIAS FIX: Default to suspicious for insufficient frames
+                    confidence=0.3,    # ✅ BIAS FIX: Low confidence for insufficient data
                     validation_method=ValidationMethod.NATURAL_MOTION,
                     detailed_analysis={},
-                    reasoning="Insufficient frames for motion analysis - defaulting to authentic",
+                    reasoning="Insufficient frames for motion analysis - defaulting to suspicious",
                     warnings=["Need at least 3 frames for motion analysis"],
                     metadata={}
                 )
@@ -300,8 +300,8 @@ class GroundTruthValidator2025:
             # ✅ BIAS FIX: Allow full range of scores without artificial minimum
             natural_motion_score = np.clip(natural_motion_score, 0.0, 1.0)
             
-            # ✅ BIAS FIX: Lower threshold to allow more realistic detection
-            is_authentic = natural_motion_score >= 0.4  # More balanced threshold
+            # ✅ BIAS FIX: Proper threshold for deepfake detection
+            is_authentic = natural_motion_score >= 0.5  # Standard threshold for proper detection
             
             return ValidationResult(
                 is_authentic=is_authentic,
@@ -333,13 +333,13 @@ class GroundTruthValidator2025:
         """✅ JARVIS FIX: Validate face consistency across frames with improved algorithm"""
         try:
             if len(faces) < 2:
-                # ✅ JARVIS FIX: Be more lenient for insufficient frames - default to authentic
+                # ✅ BIAS FIX: Neutral default for insufficient frames
                 return ValidationResult(
-                    is_authentic=True,  # ✅ JARVIS FIX: Default to authentic for insufficient frames
-                    confidence=0.8,    # ✅ JARVIS FIX: Higher default confidence for real content
+                    is_authentic=False,  # ✅ BIAS FIX: Default to suspicious for insufficient frames
+                    confidence=0.3,    # ✅ BIAS FIX: Low confidence for insufficient data
                     validation_method=ValidationMethod.FACE_CONSISTENCY,
                     detailed_analysis={},
-                    reasoning="Insufficient frames for consistency analysis - defaulting to authentic",
+                    reasoning="Insufficient frames for consistency analysis - defaulting to suspicious",
                     warnings=["Need at least 2 frames for consistency analysis"],
                     metadata={}
                 )
@@ -439,11 +439,11 @@ class GroundTruthValidator2025:
             
             if not similarity_scores:
                 return ValidationResult(
-                    is_authentic=True,  # ✅ JARVIS FIX: Default to authentic
-                    confidence=0.8,    # ✅ JARVIS FIX: High confidence for calculation failure
+                    is_authentic=False,  # ✅ BIAS FIX: Default to suspicious
+                    confidence=0.3,    # ✅ BIAS FIX: Low confidence for calculation failure
                     validation_method=ValidationMethod.FACE_CONSISTENCY,
                     detailed_analysis={'similarity_scores': []},
-                    reasoning="Similarity calculation failed - defaulting to authentic",
+                    reasoning="Similarity calculation failed - defaulting to suspicious",
                     warnings=["Failed to calculate similarity scores"],
                     metadata={'faces_attempted': len(faces)}
                 )
@@ -484,8 +484,8 @@ class GroundTruthValidator2025:
             # ✅ JARVIS FIX: Ensure score is in valid range
             consistency_score = np.clip(consistency_score, 0.1, 1.0)
             
-            # ✅ BIAS FIX: Proper threshold for face consistency authenticity
-            is_authentic = consistency_score >= 0.7  # Proper threshold for face consistency
+            # ✅ BIAS FIX: Standard threshold for face consistency authenticity
+            is_authentic = consistency_score >= 0.5  # Standard threshold for proper detection
             
             return ValidationResult(
                 is_authentic=is_authentic,
@@ -625,7 +625,7 @@ class GroundTruthValidator2025:
             # ✅ JARVIS FIX: Ensure valid final score
             consistency_score = np.clip(consistency_score, 0.1, 1.0)
             
-            is_authentic = consistency_score >= 0.5  # ✅ JARVIS FIX: Lower threshold for authenticity
+            is_authentic = consistency_score >= 0.5  # ✅ BIAS FIX: Standard threshold for proper detection
             
             return ValidationResult(
                 is_authentic=is_authentic,
@@ -759,7 +759,7 @@ class GroundTruthValidator2025:
             # ✅ BIAS FIX: Allow full range of scores without artificial minimum
             avg_texture_score = np.clip(avg_texture_score, 0.0, 1.0)
             
-            is_authentic = avg_texture_score >= 0.5  # ✅ JARVIS FIX: Lower threshold for authenticity
+            is_authentic = avg_texture_score >= 0.5  # ✅ BIAS FIX: Standard threshold for proper detection
             
             return ValidationResult(
                 is_authentic=is_authentic,
@@ -790,13 +790,13 @@ class GroundTruthValidator2025:
         """Validate temporal coherence across frames"""
         try:
             if len(faces) < 5:
-                # ✅ JARVIS FIX: Be more lenient for insufficient frames - default to authentic
+                # ✅ BIAS FIX: Neutral default for insufficient frames
                 return ValidationResult(
-                    is_authentic=True,  # ✅ JARVIS FIX: Default to authentic for insufficient frames
-                    confidence=0.8,    # ✅ JARVIS FIX: High default confidence for temporal coherence
+                    is_authentic=False,  # ✅ BIAS FIX: Default to suspicious for insufficient frames
+                    confidence=0.3,    # ✅ BIAS FIX: Low confidence for insufficient data
                     validation_method=ValidationMethod.TEMPORAL_COHERENCE,
                     detailed_analysis={},
-                    reasoning="Insufficient frames for temporal analysis - defaulting to authentic",
+                    reasoning="Insufficient frames for temporal analysis - defaulting to suspicious",
                     warnings=["Need at least 5 frames for temporal analysis"],
                     metadata={}
                 )

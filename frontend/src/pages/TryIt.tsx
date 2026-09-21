@@ -28,6 +28,8 @@ import { downloadFile, getDownloadInstructions } from '@/lib/download-utils'
 import { ResponsiveVideoPlayer } from '@/components/ui/ResponsiveVideoPlayer'
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary'
 import { LoadingState } from '@/components/ui/LoadingState'
+import { AISummaryDisplay } from '@/components/AISummaryDisplay'
+import { FullAnalysisView } from '@/components/FullAnalysisView'
 import { HeroCanvas } from "@/components/three/HeroCanvas"
 import { 
   Upload, 
@@ -48,7 +50,8 @@ import {
   FileText,
   FileSpreadsheet,
   Activity,
-  Eye
+  Eye,
+  EyeOff
 } from "lucide-react"
 
 const howItWorksSteps = [
@@ -98,6 +101,8 @@ interface AnalysisResult {
   result: string
   confidence: number
   faces_found: number
+  faces_detected?: number
+  faces_analyzed?: number
   processing_time: number
   model_used: string
   video_url?: string
@@ -114,6 +119,54 @@ interface AnalysisResult {
   total_models_used?: number
   advanced_features?: Record<string, boolean>
   sophisticated_analysis?: Record<string, boolean>
+  // Additional metadata for AI Summary Generation
+  efficientnet_result?: string
+  efficientnet_confidence?: number
+  temporal_score?: number
+  spatial_score?: number
+  frequency_score?: number
+  model_type?: string
+  analysis_method?: string
+  ensemble_scores?: Record<string, number>
+  temporal_consistency?: number
+  face_quality_score?: number
+  ai_tool_detected?: string
+  title_analysis?: {
+    detected_keywords?: string[]
+    likely_ai_tool?: string
+    title_boost?: number
+  }
+  // Additional fields for compatibility
+  processing_stages?: any
+  markdown_report?: string
+  video_id?: string
+  // Enhanced fields for dynamic AI summaries
+  detection_mode?: 'Traditional' | 'Modern AI' | 'Hybrid'
+  anomalies?: string[]
+  lighting_consistency?: number
+  motion_coherence?: number
+  texture_quality?: number
+  // Enhanced model information from backend
+  model_info?: {
+    primary_model?: string
+    model_type?: string
+    detection_mode?: string
+    models_used?: string[]
+    model_count?: number
+    is_ensemble?: boolean
+  }
+  // Extended backend data for detailed summaries
+  model_categories?: {
+    traditional_models?: number
+    modern_ai_models?: number
+    cloud_ai_models?: number
+  }
+  stage_results?: any[]
+  ai_api_used?: string
+  cross_validation_score?: number
+  hybrid_ensemble_score?: number
+  method_breakdown?: Record<string, any>
+  model_contributions?: any[]
 }
 
 function TryItContent() {
@@ -122,6 +175,7 @@ function TryItContent() {
   const [uploadMethod, setUploadMethod] = useState<'file' | 'url'>('file')
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [stageDetails, setStageDetails] = useState<string>('')
   const [dragActive, setDragActive] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [youtubeUrl, setYoutubeUrl] = useState('')
@@ -132,6 +186,7 @@ function TryItContent() {
   const [availableModes, setAvailableModes] = useState<any[]>([])
   const [currentModeInfo, setCurrentModeInfo] = useState<any>(null)
   const [showAccessRequest, setShowAccessRequest] = useState(false)
+  const [showConfidence, setShowConfidence] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Set default modes for the new 3-mode system
@@ -225,6 +280,7 @@ function TryItContent() {
 
     setIsProcessing(true)
     setProgress(0)
+    setStageDetails('Starting video analysis...')
     setError(null)
     setResult(null)
 
@@ -286,7 +342,7 @@ function TryItContent() {
 
   const pollForResults = (videoId: string) => {
     let pollCount = 0
-    const maxPolls = 20 // Reduced from 30 to 20 for faster UX (40 seconds max)
+    const maxPolls = 60 // Increased from 20 to 60 (2 minutes with 2s intervals, then 5 min total with backoff)
     let pollInterval = 2000 // Start with 2 seconds
     
     const poll = async () => {
@@ -300,8 +356,8 @@ function TryItContent() {
       }
       
       // Implement exponential backoff for long-running operations
-      if (pollCount > 10) {
-        pollInterval = Math.min(pollInterval * 1.2, 8000) // Max 8 seconds between polls
+      if (pollCount > 15) {  // Changed from 10
+        pollInterval = Math.min(pollInterval * 1.15, 5000) // Gentler increase, max 5 seconds
       }
       try {
         // Try direct status endpoint first (uses DETECTION_RESULTS dictionary)
@@ -350,8 +406,22 @@ function TryItContent() {
         }
         
         if (data.progress !== undefined) {
-          console.log(`📊 Progress update: ${data.progress}% - ${data.stage_details || 'No stage details'}`)
+          console.log(`📊 Progress update: ${data.progress}% - ${data.stage_details || data.message || 'No stage details'}`)
           setProgress(data.progress)
+        }
+        
+        // Update stage details from backend response (prioritize stage_details, fallback to message)
+        if (data.stage_details || data.message) {
+          const details = data.stage_details || data.message || ''
+          if (details && details.trim()) {
+            setStageDetails(details.trim())
+            console.log(`📋 Stage details updated: ${details.trim()}`)
+          }
+        }
+        
+        // Also update if status is processing but no details yet
+        if (data.status === 'processing' && !stageDetails && !data.stage_details && !data.message) {
+          setStageDetails('Processing video...')
         }
         
         // Handle different response formats from different endpoints
@@ -361,7 +431,7 @@ function TryItContent() {
           // Extract result from different possible response formats
           let result = data.final_result || data.prediction || data.result || data.job_result
           let confidence = data.confidence !== undefined ? data.confidence : (data.job_confidence !== undefined ? data.job_confidence : 0)
-          const facesFound = data.faces_analyzed || data.faces_detected || data.job_faces_analyzed || 0
+          const facesFound = data.faces_detected || data.faces_analyzed || data.job_faces_analyzed || data.faces_found || 0
           const processingTime = data.processing_time || data.job_processing_time || 0
           
           // Debug logging to see what we're getting
@@ -382,6 +452,8 @@ function TryItContent() {
               result = fallbackResult
             }
           }
+          
+          // Fix confidence extraction - handle both percentage and decimal formats
           if (confidence === 0 && data.confidence !== 0 && data.confidence !== undefined) {
             console.error('❌ Confidence extraction failed:', { 
               raw: data.confidence, 
@@ -391,6 +463,12 @@ function TryItContent() {
             // Use the raw confidence if extraction failed
             confidence = data.confidence
             console.log('🔄 Using raw confidence:', confidence)
+          }
+          
+          // Convert confidence to percentage if it's in decimal format (0-1)
+          if (confidence > 0 && confidence <= 1) {
+            confidence = confidence * 100
+            console.log('🔄 Converted confidence to percentage:', confidence)
           }
           
           // Final validation before setting result
@@ -414,6 +492,21 @@ function TryItContent() {
             }
           }
 
+          // Map backend detection_mode to frontend format, with fallback to selectedMode
+          const backendDetectionMode = data.detection_mode || data.model_info?.detection_mode;
+          const mappedMode = backendDetectionMode || 
+            (selectedMode === 'traditional' ? 'Traditional' : 
+             selectedMode === 'modern-ai' ? 'Modern AI' : 
+             selectedMode === 'enhanced' ? 'Enhanced' : 
+             selectedMode === 'hybrid' ? 'Hybrid' : 'Traditional');
+          
+          // Extract detailed scores from backend response
+          const modelContributions = data.model_contributions || {};
+          const temporalScore = data.temporal_consistency ?? modelContributions.temporal_score ?? (data.ensemble_scores?.temporal ?? 0.5);
+          const frequencyScore = modelContributions.frequency_score ?? (data.ensemble_scores?.frequency ?? 0.5);
+          const spatialScore = modelContributions.spatial_score ?? (data.ensemble_scores?.spatial ?? 0.5);
+          const ensembleScores = data.ensemble_scores || {};
+          
           setResult({
             result: result || 'Unknown',
             confidence: confidence,
@@ -429,11 +522,38 @@ function TryItContent() {
             // Sophisticated detection data
             ensemble_results: data.ensemble_results || data.job_ensemble_results || {},
             individual_results: data.individual_results || {},
-            model_weights: data.model_weights || {},
-            final_ensemble_score: data.final_ensemble_score || 0.5,
+            model_weights: data.model_weights || data.ensemble_weights || {},
+            final_ensemble_score: data.final_ensemble_score || data.hybrid_ensemble_score || 0.5,
             total_models_used: data.model_count || data.total_models_used || 0,
             advanced_features: data.advanced_features || {},
-            sophisticated_analysis: data.sophisticated_analysis || {}
+            sophisticated_analysis: data.sophisticated_analysis || {},
+            // Detailed scores for summary generation
+            temporal_score: temporalScore,
+            spatial_score: spatialScore,
+            frequency_score: frequencyScore,
+            temporal_consistency: temporalScore,  // Alias for compatibility
+            ensemble_scores: ensembleScores,
+            // Extended backend data for detailed summaries
+            model_categories: data.model_categories || {},
+            stage_results: data.stage_results || [],
+            ai_api_used: data.ai_api_used || data.ai_tool_detected,
+            cross_validation_score: data.cross_validation_score,
+            hybrid_ensemble_score: data.hybrid_ensemble_score,
+            method_breakdown: data.method_breakdown || data.detection_results || {},
+            model_contributions: data.model_contributions || [],
+            // Detection mode information for summary generation
+            detection_mode: mappedMode,
+            model_info: data.model_info || {
+              detection_mode: mappedMode,
+              primary_model: data.detection_method || getDetectionMethodDisplay(selectedMode, data),
+              model_type: mappedMode,
+              models_used: data.model_info?.models_used || [],
+              model_count: data.model_count || data.total_models_used || 1,
+              is_ensemble: data.model_info?.is_ensemble || false
+            },
+            // Additional fields for compatibility
+            faces_detected: facesFound || 0,  // Add this for compatibility
+            faces_analyzed: facesFound || 0   // Add this for compatibility
           })
           setIsProcessing(false)
           setProgress(100)
@@ -469,6 +589,7 @@ function TryItContent() {
     setResult(null)
     setError(null)
     setProgress(0)
+    setStageDetails('')
     setCurrentVideoId(null)
     setIsProcessing(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -491,7 +612,17 @@ function TryItContent() {
       let mimeType: string
 
       if (format === 'pdf') {
-        // Generate secure PDF report
+        // Get detection mode from result with fallback
+        const detectionMode = (result as any).detection_mode || 
+          (selectedMode === 'traditional' ? 'Traditional' : 
+           selectedMode === 'modern-ai' ? 'Modern AI' : 
+           selectedMode === 'enhanced' ? 'Enhanced' : 
+           selectedMode === 'hybrid' ? 'Hybrid' : 'Standard');
+        
+        // Get model info for report
+        const modelInfo = (result as any).model_info || {};
+        
+        // Generate secure PDF report with mode-specific information
         const { blob: pdfBlob, reportId, hash } = await SecurePDFGenerator.generateSecureReport({
           videoId,
           timestamp: new Date().toISOString(),
@@ -499,7 +630,7 @@ function TryItContent() {
           confidence: result.confidence,
           facesDetected: result.faces_found,
           processingTime: result.processing_time,
-          detectionMethod: result.model_used,
+          detectionMethod: `${detectionMode} - ${result.model_used}`,
           enhancedAnalysis: result.enhanced_analysis || false,
           frameCount: result.frame_count,
           videoDuration: result.video_duration,
@@ -507,7 +638,11 @@ function TryItContent() {
           metadataFlags: result.metadata_flags || [],
           videoUrl: youtubeUrl || (file ? URL.createObjectURL(file) : undefined),
           thumbnailUrl: undefined, // Could be enhanced to capture video thumbnail
-          reportId: ''
+          reportId: '',
+          // Mode-specific metadata
+          detectionMode: detectionMode,
+          modelCount: modelInfo.model_count || result.total_models_used || 1,
+          modelsUsed: modelInfo.models_used || []
         }, {
           includeThumbnail: true,
           includeMetadata: true,
@@ -520,7 +655,16 @@ function TryItContent() {
         filename = `deepfake_analysis_report_${reportId}.pdf`
         mimeType = 'application/pdf'
       } else {
-        // Fallback to other formats for compatibility
+        // Get detection mode from result with fallback
+        const detectionMode = (result as any).detection_mode || 
+          (selectedMode === 'traditional' ? 'Traditional' : 
+           selectedMode === 'modern-ai' ? 'Modern AI' : 
+           selectedMode === 'enhanced' ? 'Enhanced' : 
+           selectedMode === 'hybrid' ? 'Hybrid' : 'Standard');
+        
+        const modelInfo = (result as any).model_info || {};
+        
+        // Fallback to other formats for compatibility with mode-specific information
         const reportData = {
           video_id: videoId,
           status: 'completed',
@@ -528,19 +672,29 @@ function TryItContent() {
           confidence: result.confidence,
           faces_detected: result.faces_found,
           processing_time: result.processing_time,
-          detection_method: result.model_used,
+          detection_method: `${detectionMode} - ${result.model_used}`,
+          detection_mode: detectionMode,
           timestamp: new Date().toISOString(),
           enhanced_analysis: result.enhanced_analysis || false,
           frame_count: result.frame_count,
           video_duration: result.video_duration,
           bias_applied: result.bias_applied || 0,
           metadata_flags: result.metadata_flags || [],
+          model_info: {
+            detection_mode: detectionMode,
+            primary_model: modelInfo.primary_model || result.model_used,
+            model_type: modelInfo.model_type || detectionMode,
+            models_used: modelInfo.models_used || [],
+            model_count: modelInfo.model_count || result.total_models_used || 1,
+            is_ensemble: modelInfo.is_ensemble || false
+          },
           results: [{
             method: result.model_used,
             prediction: result.result,
             confidence: result.confidence,
             processing_time: result.processing_time,
-            faces_analyzed: result.faces_found
+            faces_analyzed: result.faces_found,
+            detection_mode: detectionMode
           }]
         }
 
@@ -551,6 +705,9 @@ function TryItContent() {
             mimeType = 'application/json'
             break
           case 'txt':
+            const modeInfo = reportData.detection_mode ? `- Detection Mode: ${reportData.detection_mode}\n` : '';
+            const modelInfo = reportData.model_info ? `- Models Used: ${reportData.model_info.models_used.join(', ') || 'N/A'}\n- Model Count: ${reportData.model_info.model_count || 1}\n` : '';
+            
             const txtContent = `Deepfake Analysis Report
 ========================
 
@@ -564,7 +721,7 @@ Detection Results:
 - Faces Detected: ${reportData.faces_detected}
 - Processing Time: ${reportData.processing_time}s
 - Detection Method: ${reportData.detection_method}
-- Enhanced Analysis: ${reportData.enhanced_analysis ? 'Yes' : 'No'}
+${modeInfo}${modelInfo}- Enhanced Analysis: ${reportData.enhanced_analysis ? 'Yes' : 'No'}
 
 Technical Details:
 - Frame Count: ${reportData.frame_count || 'N/A'}
@@ -579,8 +736,8 @@ Generated by iFake Deepfake Detection System
             mimeType = 'text/plain'
             break
           case 'csv':
-            const csvContent = `Video ID,Status,Prediction,Confidence,Faces Detected,Processing Time,Detection Method,Enhanced Analysis,Frame Count,Video Duration,Bias Applied,Metadata Flags
-${videoId},${reportData.status},${reportData.prediction},${reportData.confidence},${reportData.faces_detected},${reportData.processing_time},${reportData.detection_method},${reportData.enhanced_analysis},${reportData.frame_count || ''},${reportData.video_duration || ''},${reportData.bias_applied},${reportData.metadata_flags.join(';')}
+            const csvContent = `Video ID,Status,Prediction,Confidence,Faces Detected,Processing Time,Detection Method,Detection Mode,Enhanced Analysis,Frame Count,Video Duration,Bias Applied,Metadata Flags,Model Count,Models Used
+${videoId},${reportData.status},${reportData.prediction},${reportData.confidence},${reportData.faces_detected},${reportData.processing_time},${reportData.detection_method},${reportData.detection_mode || 'N/A'},${reportData.enhanced_analysis},${reportData.frame_count || ''},${reportData.video_duration || ''},${reportData.bias_applied},${reportData.metadata_flags.join(';')},${reportData.model_info?.model_count || 1},${reportData.model_info?.models_used.join(';') || 'N/A'}
 `
             blob = new Blob([csvContent], { type: 'text/csv' })
             filename = `deepfake_analysis_report_${videoId}.csv`
@@ -768,6 +925,24 @@ ${window.location.href}`
                 Real-time processing
               </Badge>
             </div>
+            
+            {/* Super Advanced Detection Link */}
+            <div className="flex justify-center mb-8">
+              <Button 
+                asChild
+                variant="outline" 
+                size="lg"
+                className="neural-button hover-lift bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-purple-500/20 text-purple-600 hover:bg-gradient-to-r hover:from-purple-500/20 hover:to-blue-500/20 hover:border-purple-500/40"
+              >
+                <a href="/super-advanced">
+                  <Brain className="w-5 h-5 mr-2" />
+                  Try Super Advanced Detection Mode
+                  <Badge variant="secondary" className="ml-2 bg-purple-500/20 text-purple-600 border-purple-500/30">
+                    NEW
+                  </Badge>
+                </a>
+              </Button>
+            </div>
           </motion.div>
         </div>
 
@@ -777,13 +952,15 @@ ${window.location.href}`
 
       {/* Access Control Section */}
       {!accessControl.hasAccess && !accessControl.isLoading && (
-        <AccessControlCard
-          feature="try"
-          onRequestAccess={() => setShowAccessRequest(true)}
-        />
+        <div className="mt-16">
+          <AccessControlCard
+            feature="try"
+            onRequestAccess={() => setShowAccessRequest(true)}
+          />
+        </div>
       )}
 
-      <div className="container mx-auto max-w-7xl px-4 pb-16">
+      <div className="container mx-auto max-w-7xl px-4 pb-16 mt-16">
         {accessControl.isLoading ? (
           <div className="flex items-center justify-center py-16">
             <motion.div
@@ -1065,7 +1242,7 @@ ${window.location.href}`
                         <LoadingState
                           variant="detection"
                           progress={progress}
-                          message={
+                          message={stageDetails || (
                             selectedMode === 'enhanced' 
                               ? progress < 20 ? "Initializing Enhanced Free AI Ensemble..." :
                                 progress < 40 ? "Extracting faces from video..." :
@@ -1093,7 +1270,7 @@ ${window.location.href}`
                                 progress < 80 ? "Running Traditional analysis..." :
                                 progress < 95 ? "Processing results..." :
                                 "Finalizing Traditional analysis..."
-                          }
+                          )}
                           className="py-8"
                         />
                           {currentVideoId && (
@@ -1378,7 +1555,7 @@ ${window.location.href}`
                                   <iframe
                                     src={`https://www.youtube.com/embed/${extractYouTubeId(youtubeUrl)}`}
                                     className="h-full w-full"
-                                    frameBorder="0"
+                                    // frameBorder="0"
                                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                     allowFullScreen
                                     title="YouTube Video"
@@ -1544,10 +1721,13 @@ ${window.location.href}`
               </motion.div>
 
               {/* Main Result */}
-              <div className="text-center mb-10 neural-card p-8 rounded-xl bg-gradient-to-br from-muted/30 to-muted/10">
+              <div className="relative text-center mb-10 neural-card p-8 rounded-xl bg-gradient-to-br from-muted/30 to-muted/10">
                 {(() => {
+                  // Clean the result text to remove any trailing numbers
+                  const cleanResult = result.result ? result.result.replace(/\s+\d+$/, '') : result.result;
+                  
                   const formattedResult = formatDetectionResult({
-                    final_result: result.result,
+                    final_result: cleanResult,
                     confidence: result.confidence,
                     faces_analyzed: result.faces_found,
                     processing_time: result.processing_time,
@@ -1566,14 +1746,6 @@ ${window.location.href}`
                       >
                         {formattedResult.label}
                       </motion.div>
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.2 }}
-                        className={`text-3xl mb-6 neural-text ${getConfidenceColorClass(result.confidence)}`}
-                      >
-                        Confidence: {formatConfidenceDisplay(result.confidence)}
-                      </motion.div>
                       {result.bias_applied && result.bias_applied > 0 && (
                         <motion.div 
                           initial={{ opacity: 0, y: 10 }}
@@ -1588,20 +1760,153 @@ ${window.location.href}`
                           </span>
                 </motion.div>
                       )}
-                      <motion.p 
+                      {/* AI-Powered Summary Display */}
+                      <motion.div 
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.4 }}
-                        className="text-muted-foreground max-w-3xl mx-auto text-lg leading-relaxed neural-text"
+                        className="max-w-4xl mx-auto"
                       >
-                        {formattedResult.isAuthentic
-                    ? 'Our advanced MesoNet CNN models indicate this video appears to be authentic and genuine with no manipulation detected.'
-                    : 'Our AI analysis detected potential deepfake indicators in this video content using advanced neural network detection.'
-                  }
-                      </motion.p>
+                        <AISummaryDisplay 
+                          detectionResult={{
+                            final_result: cleanResult,
+                            confidence: result.confidence,
+                            faces_analyzed: result.faces_found,
+                            processing_time: result.processing_time,
+                            bias_applied: result.bias_applied || 0,
+                            metadata_flags: result.metadata_flags || [],
+                            model_contributions: {
+                              efficientnet_result: result.efficientnet_result,
+                              efficientnet_confidence: result.efficientnet_confidence,
+                              temporal_score: result.temporal_score || result.temporal_consistency || 0.5,
+                              spatial_score: result.spatial_score || 0.5,
+                              frequency_score: result.frequency_score || 0.5,
+                              model_type: result.model_type || 'MesoNet CNN'
+                            },
+                            analysis_method: result.analysis_method,
+                            ensemble_scores: result.ensemble_scores,
+                            temporal_consistency: result.temporal_consistency,
+                            face_quality_score: result.face_quality_score,
+                            ai_tool_detected: result.ai_tool_detected,
+                            title_analysis: result.title_analysis,
+                            // Enhanced fields for dynamic summaries - use detection_mode from result
+                            detection_mode: (result as any).detection_mode || (result as any).model_info?.detection_mode || 
+                              (selectedMode === 'traditional' ? 'Traditional' : 
+                               selectedMode === 'modern-ai' ? 'Modern AI' : 
+                               selectedMode === 'enhanced' ? 'Enhanced' : 
+                               selectedMode === 'hybrid' ? 'Hybrid' : 'Traditional'),
+                            primary_model: (result as any).model_info?.primary_model || result.model_type || result.model_used || 'MesoNet',
+                            model_name: (result as any).model_info?.primary_model || result.model_type || result.model_used || 'MesoNet',
+                            anomalies: (result as any).anomalies || [],
+                            lighting_consistency: (result as any).lighting_consistency,
+                            motion_coherence: (result as any).motion_coherence,
+                            texture_quality: (result as any).texture_quality,
+                            model_info: (result as any).model_info
+                          }}
+                          showConfidence={showConfidence}
+                          className="mb-6"
+                        />
+                      </motion.div>
+
+                      {/* Full Analysis View */}
+                      <FullAnalysisView 
+                        detectionResult={{
+                          final_result: cleanResult,
+                          confidence: result.confidence,
+                          faces_analyzed: result.faces_found,
+                          processing_time: result.processing_time,
+                          bias_applied: result.bias_applied || 0,
+                          metadata_flags: result.metadata_flags || [],
+                          model_contributions: {
+                            efficientnet_result: result.efficientnet_result,
+                            efficientnet_confidence: result.efficientnet_confidence,
+                            temporal_score: result.temporal_score,
+                            spatial_score: result.spatial_score,
+                            frequency_score: result.frequency_score,
+                            model_type: result.model_type || 'MesoNet CNN'
+                          },
+                          analysis_method: result.analysis_method,
+                          ensemble_scores: result.ensemble_scores,
+                          temporal_consistency: result.temporal_consistency,
+                          face_quality_score: result.face_quality_score,
+                          ai_tool_detected: result.ai_tool_detected,
+                          title_analysis: result.title_analysis,
+                          // Enhanced fields for dynamic summaries
+                          detection_mode: (result as any).detection_mode || (result as any).model_info?.detection_mode || (result.ensemble_scores && Object.keys(result.ensemble_scores).length > 1 ? 'Hybrid' : 'Traditional'),
+                          primary_model: (result as any).model_info?.primary_model || result.model_type || result.model_used || 'MesoNet',
+                          model_name: (result as any).model_info?.primary_model || result.model_type || result.model_used || 'MesoNet',
+                          anomalies: (result as any).anomalies || [],
+                          lighting_consistency: (result as any).lighting_consistency,
+                          motion_coherence: (result as any).motion_coherence,
+                          texture_quality: (result as any).texture_quality,
+                          model_info: (result as any).model_info
+                        }}
+                        showConfidence={showConfidence}
+                        onToggleConfidence={() => setShowConfidence(!showConfidence)}
+                        className="mb-6"
+                      />
+                      
+                      {/* Confidence Toggle Button */}
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.5 }}
+                        className="mt-6"
+                      >
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowConfidence(!showConfidence)}
+                          className="neural-button hover-lift border-muted-foreground/30 text-muted-foreground hover:text-foreground hover:border-foreground/50"
+                        >
+                          {showConfidence ? (
+                            <>
+                              <EyeOff className="w-4 h-4 mr-2" />
+                              Hide Confidence
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-4 h-4 mr-2" />
+                              View Confidence
+                            </>
+                          )}
+                        </Button>
+                      </motion.div>
                     </>
                   );
                 })()}
+                
+                {/* Confidence Panel */}
+                {showConfidence && (
+                  <motion.div
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.3 }}
+                    className="absolute top-4 right-4 bg-muted/80 backdrop-blur-sm border border-border/50 rounded-lg p-4 max-w-xs"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-sm text-muted-foreground">Confidence Score</div>
+                      <button
+                        onClick={() => setShowConfidence(false)}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-muted/50"
+                        title="Hide confidence"
+                      >
+                        <EyeOff className="w-3 h-3" />
+                      </button>
+                    </div>
+                    {result.confidence > 0 && (
+                      <div className={`text-2xl font-bold ${getConfidenceColorClass(result.confidence)}`}>
+                        {formatConfidenceDisplay(result.confidence)}
+                      </div>
+                    )}
+                    {result.confidence > 0 && (
+                      <div className="text-xs text-muted-foreground mt-1">
+                        AI Analysis Confidence
+                      </div>
+                    )}
+                  </motion.div>
+                )}
               </div>
 
               {/* Detailed Metrics */}
@@ -1806,12 +2111,13 @@ ${window.location.href}`
               )}
 
               {/* Action Buttons */}
-              <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
+              <div className="border-t border-border/30 mt-8 pt-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 place-items-center w-full">
                 <LoadingButton 
                   onClick={resetAnalysis}
                   size="lg"
                   variant="default"
-                  className="neural-button hover-lift"
+                  className="neural-button hover-lift w-full"
                 >
                   <Upload className="w-4 h-4 mr-2" />
                   Analyze Another Video
@@ -1820,7 +2126,7 @@ ${window.location.href}`
                   onClick={() => downloadReport('pdf')}
                   size="lg"
                   variant="outline"
-                  className="neural-button hover-lift"
+                  className="neural-button hover-lift w-full"
                 >
                   <FileText className="w-4 h-4 mr-2" />
                   Download PDF Report
@@ -1830,7 +2136,7 @@ ${window.location.href}`
                     <Button 
                       size="lg"
                       variant="outline"
-                      className="neural-button hover-lift bg-background border-border text-foreground hover:bg-accent hover:text-accent-foreground shadow-md hover:shadow-lg transition-all duration-300"
+                      className="neural-button hover-lift w-full bg-background border-border text-foreground hover:bg-accent hover:text-accent-foreground shadow-md hover:shadow-lg transition-all duration-300"
                     >
                       <Database className="w-4 h-4 mr-2" />
                       Other Formats
@@ -1865,11 +2171,12 @@ ${window.location.href}`
                   onClick={() => shareResults()}
                   size="lg"
                   variant="outline"
-                  className="neural-button hover-lift"
+                  className="neural-button hover-lift w-full"
                 >
                   <Users className="w-4 h-4 mr-2" />
                   Share Results
                 </LoadingButton>
+                </div>
               </div>
             </EnhancedCard>
           </motion.div>

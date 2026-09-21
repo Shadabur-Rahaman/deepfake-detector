@@ -70,7 +70,8 @@ export const EnhancedNotificationBell: React.FC<EnhancedNotificationBellProps> =
     updateSettings,
     getNotificationCount,
     searchNotifications,
-    refreshNotifications
+    refreshNotifications,
+    generateDemoData
   } = useEnhancedNotifications();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -348,6 +349,15 @@ export const EnhancedNotificationBell: React.FC<EnhancedNotificationBellProps> =
                       className="neural-button"
                     >
                       <RefreshCw className={cn("w-4 h-4", isLoading && "animate-spin")} />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={generateDemoData}
+                      className="neural-button"
+                      title="Generate Demo Data"
+                    >
+                      <User className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>

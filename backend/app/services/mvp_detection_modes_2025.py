@@ -505,38 +505,13 @@ class MVPAggressiveDetector2025:
             logger.info(f"   📊 Validation confidence: {validation_result.confidence:.3f}")
             logger.info(f"   🧠 Reasoning: {validation_result.reasoning}")
             
-            # ✅ FIX: Balanced integration (not dominant override)
+            # ✅ BIAS FIX: Use model predictions without ground truth override
             raw_confidence = unbiased_score.confidence
             
-            # Ground truth weight: 20% (reduced from 30%)
-            # Model predictions weight: 80%
-            gt_weight = 0.20
-            model_weight = 0.80
-            
-            # ✅ JARVIS DEBUG: Log raw ensemble scores for debugging
-            logger.info(f"   🔍 DEBUG: Raw ensemble prediction: {unbiased_score.prediction}")
-            logger.info(f"   🔍 DEBUG: Raw ensemble confidence: {raw_confidence:.3f}")
-            logger.info(f"   🔍 DEBUG: Validation is_authentic: {validation_result.is_authentic}")
-            logger.info(f"   🔍 DEBUG: Validation confidence: {validation_result.confidence:.3f}")
-            
-            # ✅ WEIGHTED FIX: Ground Truth (30%) + Model Predictions (70%)
-            # Use weighted combination to resolve conflicts between GT and models
-            gt_weight = 0.20
-            model_weight = 0.80
-            
-            if validation_result.is_authentic and validation_result.confidence > 0.6:
-                # GT says authentic (invert to fake scale): 1.0 - validation_result.confidence
-                # Model says fake: raw_confidence
-                weighted_fake_confidence = (
-                    (1.0 - validation_result.confidence) * gt_weight +
-                    raw_confidence * model_weight
-                )
-                aggressive_confidence = weighted_fake_confidence
-                logger.info(f"   🛡️ WEIGHTED FIX: GT authentic + model fake = {aggressive_confidence:.3f}")
-            else:
-                # Use model confidence with minimal adjustment
-                aggressive_confidence = raw_confidence
-                logger.info(f"   🛡️ WEIGHTED FIX: Using model confidence: {aggressive_confidence:.3f}")
+            # ✅ BIAS FIX: Use raw model confidence without ground truth interference
+            aggressive_confidence = raw_confidence
+            logger.info(f"   🔍 Using raw model confidence: {aggressive_confidence:.3f}")
+            logger.info(f"   🔍 Ground truth validation: {'AUTHENTIC' if validation_result.is_authentic else 'SUSPICIOUS'} (info only)")
             
             detection_scores.append(('ensemble_aggressive_calibrated', aggressive_confidence, 0.70))
             
@@ -1104,25 +1079,15 @@ class MVPConservativeDetector2025:
             logger.info(f"   📊 Validation confidence: {validation_result.confidence:.3f}")
             logger.info(f"   🧠 Reasoning: {validation_result.reasoning}")
             
-            # ✅ JARVIS FIX: Conservative mode uses traditional model as primary decision maker
-            # Only apply minimal ground truth correction for extreme cases
+            # ✅ BIAS FIX: Use traditional model confidence without ground truth interference
             if detection_scores:
                 # Get the primary traditional model score
                 primary_score = detection_scores[0][1]  # First detection score
                 
-                # ✅ BIAS FIX: Minimal ground truth correction for conservative mode
-                if validation_result.is_authentic and validation_result.confidence > 0.8:
-                    # Only very light correction for extremely clear authentic content
-                    conservative_confidence = max(0.2, primary_score * 0.9)  # Very light reduction
-                    logger.info(f"   🛡️ BIAS FIX: Extremely authentic content, very light confidence reduction")
-                elif not validation_result.is_authentic and validation_result.confidence < 0.3:
-                    # Light boost for clearly suspicious content
-                    conservative_confidence = min(0.9, primary_score * 1.1)  # Light boost
-                    logger.info(f"   🛡️ BIAS FIX: Suspicious content detected, light boost")
-                else:
-                    # Use traditional model confidence directly - no bias
-                    conservative_confidence = primary_score
-                    logger.info(f"   🛡️ BIAS FIX: Using traditional model confidence without bias")
+                # ✅ BIAS FIX: Use raw model confidence without any ground truth adjustments
+                conservative_confidence = primary_score
+                logger.info(f"   🔍 Using traditional model confidence: {conservative_confidence:.3f}")
+                logger.info(f"   🔍 Ground truth validation: {'AUTHENTIC' if validation_result.is_authentic else 'SUSPICIOUS'} (info only)")
             
             detection_scores.append(('ensemble_conservative_calibrated', conservative_confidence, 0.80))
             
@@ -1668,27 +1633,13 @@ class MVPHybridDetector2025:
             logger.info(f"   📊 Validation confidence: {validation_result.confidence:.3f}")
             logger.info(f"   🧠 Reasoning: {validation_result.reasoning}")
             
-            # ✅ JARVIS FIX: Apply balanced confidence adjustment with proper ground truth correction
+            # ✅ BIAS FIX: Use model predictions without ground truth override
             raw_confidence = unbiased_score.confidence
             
-            # ✅ WEIGHTED FIX: Ground Truth (30%) + Model Predictions (70%)
-            # Use weighted combination to resolve conflicts between GT and models
-            gt_weight = 0.20
-            model_weight = 0.80
-            
-            if validation_result.is_authentic and validation_result.confidence > 0.6:
-                # GT says authentic (invert to fake scale): 1.0 - validation_result.confidence
-                # Model says fake: raw_confidence
-                weighted_fake_confidence = (
-                    (1.0 - validation_result.confidence) * gt_weight +
-                    raw_confidence * model_weight
-                )
-                balanced_confidence = weighted_fake_confidence
-                logger.info(f"   🛡️ WEIGHTED FIX: GT authentic + model fake = {balanced_confidence:.3f}")
-            else:
-                # Use model confidence with minimal adjustment
-                balanced_confidence = raw_confidence
-                logger.info(f"   🛡️ WEIGHTED FIX: Using model confidence: {balanced_confidence:.3f}")
+            # ✅ BIAS FIX: Use raw model confidence without ground truth interference
+            balanced_confidence = raw_confidence
+            logger.info(f"   🔍 Using raw model confidence: {balanced_confidence:.3f}")
+            logger.info(f"   🔍 Ground truth validation: {'AUTHENTIC' if validation_result.is_authentic else 'SUSPICIOUS'} (info only)")
             
             detection_scores.append(('ensemble_balanced_calibrated', balanced_confidence, 0.60))
             

@@ -21,14 +21,15 @@ class RealTimeDeepfakeDetector:
         # Enhanced device selection with CUDA safety
         try:
             if torch.cuda.is_available():
-                # Test CUDA with basic operations
-                test_tensor = torch.tensor([1.0])
-                test_tensor = test_tensor.cuda()
-                _ = test_tensor * 2
-                del test_tensor
-                torch.cuda.empty_cache()
-                self.device = torch.device("cuda")
-                print("[OK] CUDA device test passed")
+                # Use centralized CUDA safety manager to avoid driver conflicts
+                from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                
+                if is_cuda_available_global():
+                    self.device = get_validated_device()
+                    print("[OK] CUDA device test passed (centralized)")
+                else:
+                    self.device = "cpu"
+                    print("[INFO] CUDA not available or unsafe, using CPU")
             else:
                 self.device = torch.device("cpu")
                 print("[INFO] CUDA not available, using CPU")

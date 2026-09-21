@@ -1157,6 +1157,24 @@ ${sessionData.results.map(result =>
               Live camera analysis using advanced AI multi-stage detection
             </p>
             
+            {/* Super Advanced Detection Link */}
+            <div className="flex justify-center mb-6">
+              <Button 
+                asChild
+                variant="outline" 
+                size="lg"
+                className="neural-button hover-lift bg-gradient-to-r from-purple-500/10 to-blue-500/10 border-purple-500/20 text-purple-600 hover:bg-gradient-to-r hover:from-purple-500/20 hover:to-blue-500/20 hover:border-purple-500/40"
+              >
+                <a href="/super-advanced">
+                  <Brain className="w-5 h-5 mr-2" />
+                  Try Super Advanced Detection Mode
+                  <Badge variant="secondary" className="ml-2 bg-purple-500/20 text-purple-600 border-purple-500/30">
+                    NEW
+                  </Badge>
+                </a>
+              </Button>
+            </div>
+            
             {/* Status Indicators */}
             <div className="flex flex-wrap justify-center gap-3 mb-6">
               <Badge variant="outline" className={`neural-card ${connectionStatus === 'connected' ? 'border-success/50 text-success' : 'border-muted'}`}>

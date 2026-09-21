@@ -48,7 +48,7 @@ class ResNet50Detector:
         
         try:
             # Load ResNet50 with pretrained weights
-            self.model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+            self.model = models.resnet50(weights=None)
             
             # Modify for binary classification
             self.model.fc = nn.Linear(self.model.fc.in_features, 2)

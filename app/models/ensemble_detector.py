@@ -123,7 +123,11 @@ class MultiStageDeepfakeDetector:
                 await self.load_models()
 
             from app.services.video_processor import extract_faces_from_video
-            faces = extract_faces_from_video(video_path)
+            faces_result = await extract_faces_from_video(video_path)
+            if isinstance(faces_result, tuple) and len(faces_result) == 2:
+                faces, metadata = faces_result
+            else:
+                faces = faces_result if isinstance(faces_result, list) else []
 
             if not faces:
                 return {

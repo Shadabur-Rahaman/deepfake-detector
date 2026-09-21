@@ -158,7 +158,7 @@
 #         try:
 #             if not os.path.exists(MODEL_PATH):
 #                 logger.warning("⚠️ Model file not found. Creating demo model.")
-#                 model = efficientnet_b0(weights='IMAGENET1K_V1')
+#                 model = efficientnet_b0(weights=None)
 #                 num_ftrs = model.classifier[1].in_features
 #                 model.classifier[1] = nn.Linear(num_ftrs, 1)
 #             else:
@@ -295,7 +295,7 @@
 #         try:
 #             if not os.path.exists(MODEL_PATH):
 #                 logger.warning("⚠️ Model file not found. Creating demo model.")
-#                 model = efficientnet_b0(weights='IMAGENET1K_V1')
+#                 model = efficientnet_b0(weights=None)
 #                 num_ftrs = model.classifier[1].in_features
 #                 model.classifier[1] = nn.Linear(num_ftrs, 1)
 #             else:
@@ -441,7 +441,7 @@ def load_deepfake_model():
         try:
             if not os.path.exists(MODEL_PATH):
                 logger.warning("⚠️ Model file not found. Creating demo model.")
-                model = efficientnet_b0(weights='IMAGENET1K_V1')
+                model = efficientnet_b0(weights=None)
                 num_ftrs = model.classifier[1].in_features
                 model.classifier[1] = nn.Linear(num_ftrs, 1)
             else:
@@ -459,12 +459,17 @@ def load_deepfake_model():
             raise RuntimeError(f"Cannot load deepfake model: {e}")
     return deepfake_model
 
-async def detect_deepfake_in_frames(faces: List[torch.Tensor]) -> Tuple[str, float]:
+async def detect_deepfake_in_frames(faces: List[torch.Tensor], video_id: str = None, base_progress: int = 0) -> Tuple[str, float]:
     """
     CORRECTED: Proper deepfake detection logic
     Your model appears to output:
     - High values (close to 1.0) for REAL faces
     - Low values (close to 0.0) for DEEPFAKE faces
+    
+    Args:
+        faces: List of face tensors
+        video_id: Optional video identifier for logging
+        base_progress: Optional base progress for tracking
     """
     if not faces:
         return "No Faces Detected", 0.0
@@ -473,7 +478,30 @@ async def detect_deepfake_in_frames(faces: List[torch.Tensor]) -> Tuple[str, flo
     logger.info(f"🔍 Analyzing {len(faces)} faces...")
 
     try:
-        face_batch = torch.stack(faces).to(device)
+        # Ensure proper normalization before stacking
+        normalized_faces = []
+        for face in faces:
+            if isinstance(face, torch.Tensor):
+                # Check if already normalized (values between 0-1)
+                if face.max() > 1.0:
+                    face = face / 255.0
+                # Apply ImageNet normalization
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+                face = (face - mean) / std
+                normalized_faces.append(face)
+            else:
+                # Convert numpy array to tensor and normalize
+                face_tensor = torch.from_numpy(face).float()
+                if face_tensor.max() > 1.0:
+                    face_tensor = face_tensor / 255.0
+                # Apply ImageNet normalization
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+                face_tensor = (face_tensor - mean) / std
+                normalized_faces.append(face_tensor)
+        
+        face_batch = torch.stack(normalized_faces).to(device)
         with torch.no_grad():
             logits = model(face_batch)
             probabilities = torch.sigmoid(logits).cpu().numpy().flatten()
@@ -1006,7 +1034,7 @@ enhanced_detector = AdvancedDetector()
 #         try:
 #             if not os.path.exists(MODEL_PATH):
 #                 logger.warning("⚠️ Model file not found. Creating demo model.")
-#                 model = efficientnet_b0(weights='IMAGENET1K_V1')
+#                 model = efficientnet_b0(weights=None)
 #                 num_ftrs = model.classifier[1].in_features
 #                 model.classifier[1] = nn.Linear(num_ftrs, 1)
 #             else:

@@ -34,7 +34,13 @@ class AdvancedYOLOv8FaceDetector:
                 'yolov8n-face.pt',
                 'yolov8n-face-lindevs.pt',
                 str(Path(__file__).parent.parent / 'yolov8n-face.pt'),
-                str(Path(__file__).parent.parent / 'yolov8n-face-lindevs.pt')
+                str(Path(__file__).parent.parent / 'yolov8n-face-lindevs.pt'),
+                # Add project root directory paths
+                str(Path(__file__).parent.parent.parent / 'yolov8n-face.pt'),
+                str(Path(__file__).parent.parent.parent / 'yolov8n-face-lindevs.pt'),
+                # Add backend services directory paths
+                str(Path(__file__).parent.parent.parent / 'backend' / 'yolov8n-face.pt'),
+                str(Path(__file__).parent.parent.parent / 'backend' / 'app' / 'services' / 'yolov8n-face.pt')
             ]
             
             for model_path in model_paths:

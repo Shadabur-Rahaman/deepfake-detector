@@ -40,7 +40,7 @@ class ComprehensiveErrorRecovery:
         
         # Force CPU mode
         try:
-            from services.cuda_safety_manager import force_cpu_mode
+            from backend.app.services.cuda_safety_manager import force_cpu_mode
             force_cpu_mode()
             logger.info("Forced CPU mode due to CUDA error")
         except ImportError:

@@ -3,8 +3,10 @@ import uuid
 import re
 import logging
 import time
+import subprocess
+import hashlib
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -12,18 +14,40 @@ logger = logging.getLogger(__name__)
 try:
     import yt_dlp
     YOUTUBE_AVAILABLE = True
-    print("[OK] yt-dlp imported successfully")
-except ImportError:
+    logger.info("[OK] yt-dlp imported successfully")
+except ImportError as e:
     YOUTUBE_AVAILABLE = False
-    print("[WARNING] yt-dlp not available")
+    logger.warning(f"[WARNING] yt-dlp not available: {e}")
 
 class YouTubeDownloader:
-    """OPTIMIZED: Fast YouTube video downloader with minimal delays"""
+    """OPTIMIZED: Fast YouTube video downloader with intelligent caching and minimal delays"""
     
     def __init__(self):
         self.download_dir = Path("downloaded_videos")
         self.download_dir.mkdir(exist_ok=True)
+        
+        # Cache for successful strategies to avoid retrying failed ones
+        self.strategy_cache = {}
+        self.cache_cleared = False
+        
+        # Only clear cache once on startup, not on every download
+        self._clear_yt_dlp_cache_once()
         print(f"[OK] YouTubeDownloader initialized, download_dir: {self.download_dir}")
+
+    def _clear_yt_dlp_cache_once(self):
+        """Clear yt-dlp cache only once on startup"""
+        if self.cache_cleared:
+            return
+            
+        try:
+            if YOUTUBE_AVAILABLE:
+                # Clear cache using yt-dlp command
+                subprocess.run(['yt-dlp', '--rm-cache-dir'], 
+                             capture_output=True, text=True, check=False)
+                logger.info("🧹 Cleared yt-dlp cache to prevent 403 errors")
+                self.cache_cleared = True
+        except Exception as e:
+            logger.debug(f"Cache clear attempt: {e}")
 
     def extract_video_id(self, url: str) -> str:
         """Extract YouTube video ID from ALL possible URL formats"""
@@ -121,13 +145,14 @@ class YouTubeDownloader:
             'sleep_interval_subtitles': 0,
         }
 
-    async def download_video(self, youtube_url: str) -> Tuple[str, str, Dict]:
+    async def download_video(self, youtube_url: str, video_id: str = None, progress_callback=None) -> Tuple[str, Dict]:
         """OPTIMIZED: Fast download with minimal API calls and delays"""
         
         if not YOUTUBE_AVAILABLE:
             raise ImportError("yt-dlp not installed. Install with: pip install yt-dlp")
 
-        video_id = str(uuid.uuid4())
+        if video_id is None:
+            video_id = str(uuid.uuid4())
         
         try:
             # Fast URL processing
@@ -140,6 +165,22 @@ class YouTubeDownloader:
             
             # OPTIMIZED: Fast download options
             ydl_opts = self.get_fast_ydl_opts(video_id)
+            
+            # Add progress hook if callback provided
+            if progress_callback:
+                def progress_hook(d):
+                    if d['status'] == 'downloading':
+                        downloaded = d.get('downloaded_bytes', 0)
+                        total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                        if total > 0:
+                            percent = min(30, (downloaded / total) * 30)  # Cap at 30% for download phase
+                            progress_callback(int(percent), f"Downloading YouTube video... {int((downloaded / total) * 100)}%")
+                        else:
+                            progress_callback(5, "Downloading YouTube video...")
+                    elif d['status'] == 'finished':
+                        progress_callback(30, "Download complete, processing video...")
+                
+                ydl_opts['progress_hooks'] = [progress_hook]
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(clean_url, download=True)
@@ -194,7 +235,7 @@ class YouTubeDownloader:
                     'filesize': downloaded_file.stat().st_size
                 }
                 
-                return video_id, downloaded_file, metadata
+                return downloaded_file, metadata
                 
         except Exception as e:
             logger.error(f"YouTube processing error: {e}")
@@ -224,7 +265,7 @@ class YouTubeDownloader:
 # Global singleton
 if YOUTUBE_AVAILABLE:
     youtube_downloader = YouTubeDownloader()
-    print("[OK] YouTube downloader instance created with fast optimization")
+    print("[OK] YouTube downloader instance created with optimized speed and efficiency")
 else:
     youtube_downloader = None
     print("[WARNING] YouTube downloader not available")

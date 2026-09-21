@@ -14,10 +14,10 @@ class FreeAIEnsemble:
 
     def __init__(self):
         self.models = {}
-        # PRODUCTION: Heavily favor your trained EfficientNet
+        # ✅ BIAS FIX: Balanced weights for unbiased detection
         self.weights = {
-            'efficientnet': 0.80,    # Primary model - increased weight
-            'frequency_analysis': 0.20,  # Simple supplementary analysis only
+            'efficientnet': 0.50,    # Balanced weight
+            'frequency_analysis': 0.50,  # Equal weight for balanced detection
             # REMOVED: Problematic Hugging Face model completely
         }
         self.models_loaded = False
@@ -38,17 +38,16 @@ class FreeAIEnsemble:
             from backend.app.services.deepfake_detector import detect_deepfake_in_frames
             efficientnet_pred, efficientnet_conf = await detect_deepfake_in_frames(faces)
             
-            # PRODUCTION: Conservative bias toward real content
+            # ✅ BIAS FIX: Unbiased confidence handling
+            # Initialize boosted_conf with default value to prevent scope error
+            boosted_conf = 0.5  # Default neutral confidence
+            
             if isinstance(efficientnet_conf, (int, float)):
                 if efficientnet_conf > 1.0:
                     efficientnet_conf = efficientnet_conf / 100.0
                     
-                # CONSERVATIVE real content boosting - favor real content more
-                if 'Real' in str(efficientnet_pred):
-                    boosted_conf = min(efficientnet_conf * 1.2, 0.95)  # Slight boost for real content
-                else:
-                    # For deepfake predictions, be much more conservative - reduce confidence
-                    boosted_conf = max(efficientnet_conf * 0.5, 0.01)  # Reduced from 0.75 to 0.5
+                # ✅ BIAS FIX: No artificial boosting - use raw confidence
+                boosted_conf = efficientnet_conf  # Use raw confidence without bias
                     
             results['efficientnet'] = {
                 'prediction': efficientnet_pred,
@@ -59,10 +58,10 @@ class FreeAIEnsemble:
             
         except Exception as e:
             logger.warning(f"EfficientNet analysis failed: {e}")
-            # ✅ BIAS FIX: Conservative fallback - favor real content
+            # ✅ BIAS FIX: Neutral fallback - no bias toward real content
             results['efficientnet'] = {
-                'prediction': 'Real Video',
-                'confidence': 0.8,  # High confidence in real content when model fails
+                'prediction': 'Uncertain',
+                'confidence': 0.5,  # Neutral confidence when model fails
                 'weight': self.weights['efficientnet']
             }
 
@@ -76,7 +75,7 @@ class FreeAIEnsemble:
         except Exception as e:
             logger.warning(f"Frequency analysis failed: {e}")
             results['frequency'] = {
-                'score': 0.2,  # Conservative fallback - favor real content
+                'score': 0.5,  # ✅ BIAS FIX: Neutral fallback - no bias
                 'weight': self.weights['frequency_analysis']
             }
 
@@ -94,7 +93,7 @@ class FreeAIEnsemble:
         }
 
     def _production_frequency_analysis(self, faces: List[torch.Tensor]) -> float:
-        """Production-ready frequency analysis heavily biased toward real"""
+        """Production-ready frequency analysis with balanced detection"""
         try:
             if len(faces) < 2:
                 return 0.5  # Neutral
@@ -124,13 +123,13 @@ class FreeAIEnsemble:
                         
                         high_freq_ratio = high_freq_energy / (total_energy + 1e-10)
 
-                        # ✅ BIAS FIX: Unbiased frequency analysis based on actual ratios
+                        # ✅ BIAS FIX: Balanced frequency analysis based on actual ratios
                         if high_freq_ratio < 0.005:  # Extremely suspicious
                             artifact_scores.append(0.20)  # Strong indication of fake
                         elif high_freq_ratio < 0.02:  # Moderately suspicious
                             artifact_scores.append(0.40)  # Moderate indication of fake
                         elif high_freq_ratio < 0.05:  # Neutral
-                            artifact_scores.append(0.60)  # Neutral
+                            artifact_scores.append(0.50)  # True neutral
                         else:
                             artifact_scores.append(0.80)  # Indication of real content
 
@@ -144,7 +143,7 @@ class FreeAIEnsemble:
             return 0.5  # Neutral fallback
 
     def _production_ensemble_decision(self, results: Dict) -> Dict:
-        """Production ensemble heavily optimized for real content"""
+        """Production ensemble with balanced detection"""
         total_real_score = 0.0
         total_weight = 0.0
 
@@ -227,20 +226,20 @@ class FreeAIEnsemble:
         confidence = final_result.get('confidence', 75)
 
         return {
-            'technical_reasoning': f"Production-grade ensemble using {models_used} reliable AI models with heavy bias toward authentic content on {faces_count} face samples",
-            'confidence_explanation': f"High reliability ({confidence:.1f}%) achieved through optimized ensemble favoring real content accuracy",
+            'technical_reasoning': f"Production-grade ensemble using {models_used} reliable AI models with balanced detection on {faces_count} face samples",
+            'confidence_explanation': f"High reliability ({confidence:.1f}%) achieved through balanced ensemble detection",
             'model_breakdown': {
-                'primary_model': 'EfficientNet-B0 (80% weight)',
-                'supplementary': 'Conservative Frequency Analysis (20% weight)',
+                'primary_model': 'EfficientNet-B0 (50% weight)',
+                'supplementary': 'Balanced Frequency Analysis (50% weight)',
                 'removed_models': 'Problematic Hugging Face classifier removed',
-                'optimization': 'Production-tuned for real content accuracy'
+                'optimization': 'Production-tuned for balanced accuracy'
             },
             'recommendation': f"Content reliably classified as {final_result['prediction'].lower()} using production-optimized detection",
             'production_features': {
-                'real_content_optimization': 'Heavy bias toward authentic content',
-                'threshold_tuning': 'Ultra-low detection threshold (0.25)',
-                'confidence_boosting': '25% boost for real predictions',
-                'error_handling': 'All fallbacks favor real classification',
+                'balanced_detection': 'Equal weight for real and fake detection',
+                'threshold_tuning': 'Standard detection threshold (0.5)',
+                'confidence_boosting': 'No artificial boosting',
+                'error_handling': 'Neutral fallbacks for failed models',
                 'model_selection': 'Only most reliable models used'
             }
         }

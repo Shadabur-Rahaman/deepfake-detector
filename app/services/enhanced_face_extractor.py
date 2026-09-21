@@ -6,7 +6,7 @@ from typing import List
 import logging
 
 # Import your existing extractor as fallback
-from backend.app.services.video_processor import extract_faces_from_video as fallback_extractor
+from app.services.video_processor import extract_faces_from_video as fallback_extractor
 
 # Setup path to advanced models
 from backend.app.utils.model_importer import MODEL_AVAILABILITY

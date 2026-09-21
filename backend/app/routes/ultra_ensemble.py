@@ -22,6 +22,9 @@ try:
     from ..services.ultra_aggressive_warning_suppression import ultra_aggressive_suppression
     ultra_aggressive_suppression()
 except ImportError:
+    # Fallback to basic warning suppression
+    import warnings
+    warnings.simplefilter("ignore")
     pass
 
 import asyncio

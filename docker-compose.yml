@@ -1,0 +1,28 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - config.env
+    environment:
+      FORCE_CPU_MODE: "1"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:8080,http://127.0.0.1:5173"
+    volumes:
+      - ./ml_artifacts:/app/ml_artifacts
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8000
+        VITE_WS_URL: ws://localhost:8000/ws/admin
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

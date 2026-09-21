@@ -14,10 +14,17 @@ import os
 import logging
 import torch
 import warnings
+import threading
 from typing import Optional, Dict, Any, Tuple
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+# Global initialization lock to prevent concurrent CUDA tests
+_cuda_init_lock = threading.Lock()
+_cuda_initialized = False
+_global_safe_device = "cpu"
+_global_cuda_available = False
 
 class CUDASafetyManager:
     """Comprehensive CUDA safety manager with error handling and device management"""
@@ -32,14 +39,20 @@ class CUDASafetyManager:
     def _initialize_safety_measures(self):
         """Initialize CUDA safety measures"""
         try:
-            # Check for force CPU mode
-            if (os.environ.get("FORCE_CPU_MODE", "0") == "1" or 
-                os.environ.get("CUDA_VISIBLE_DEVICES", "") == "" or
-                os.environ.get("MINIMAL_STARTUP_MODE", "0") == "1"):
+            # Check for force CPU mode - but only if explicitly set to "1"
+            force_cpu = os.environ.get("FORCE_CPU_MODE", "0") == "1"
+            cuda_disabled = os.environ.get("CUDA_VISIBLE_DEVICES", "") == ""
+            
+            if force_cpu or cuda_disabled:
                 logger.info("Force CPU mode detected, skipping CUDA initialization")
                 self.safe_device = "cpu"
                 self.cuda_available = False
                 self.fallback_reasons.append("Force CPU mode enabled")
+            elif cuda_disabled:
+                logger.info("CUDA disabled via CUDA_VISIBLE_DEVICES, skipping CUDA initialization")
+                self.safe_device = "cpu"
+                self.cuda_available = False
+                self.fallback_reasons.append("CUDA_VISIBLE_DEVICES disabled")
                 return
             
             # Set CUDA safety environment variables
@@ -250,12 +263,124 @@ class CUDASafetyManager:
         """Check if CUDA is safe to use"""
         return self.cuda_available and self.safe_device != "cpu"
 
+def initialize_global_cuda():
+    """One-time global CUDA initialization to prevent concurrent driver conflicts"""
+    global _cuda_initialized, _global_safe_device, _global_cuda_available
+    
+    with _cuda_init_lock:
+        if _cuda_initialized:
+            return _global_safe_device, _global_cuda_available
+        
+        logger.info("🔧 Performing one-time global CUDA initialization...")
+        
+        try:
+            # Check for force CPU mode first (only explicit settings)
+            if os.environ.get("FORCE_CPU_MODE", "0") == "1":
+                logger.info("Force CPU mode detected, skipping CUDA initialization")
+                _global_safe_device = "cpu"
+                _global_cuda_available = False
+                _cuda_initialized = True
+                return _global_safe_device, _global_cuda_available
+            
+            # Check if CUDA_VISIBLE_DEVICES is explicitly set to empty (not just unset)
+            cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+            if cuda_visible == "":
+                # CUDA_VISIBLE_DEVICES is not set, which means use all available devices
+                logger.info("CUDA_VISIBLE_DEVICES not set, using all available devices")
+            elif cuda_visible == "-1" or cuda_visible == "":
+                # Explicitly disabled
+                logger.info("CUDA_VISIBLE_DEVICES explicitly disabled")
+                _global_safe_device = "cpu"
+                _global_cuda_available = False
+                _cuda_initialized = True
+                return _global_safe_device, _global_cuda_available
+            
+            # Set CUDA safety environment variables
+            safety_env = {
+                'CUDA_LAUNCH_BLOCKING': '0',
+                'PYTORCH_CUDA_ALLOC_CONF': 'max_split_size_mb:128',
+                'CUDA_CACHE_DISABLE': '1',
+                'TORCH_USE_CUDA_DSA': '1',
+            }
+            
+            for key, value in safety_env.items():
+                os.environ.setdefault(key, value)
+            
+            # Test CUDA availability with comprehensive checks
+            if not torch.cuda.is_available():
+                logger.info("CUDA not available, using CPU")
+                _global_safe_device = "cpu"
+                _global_cuda_available = False
+                _cuda_initialized = True
+                return _global_safe_device, _global_cuda_available
+            
+            device_count = torch.cuda.device_count()
+            if device_count == 0:
+                logger.info("No CUDA devices found, using CPU")
+                _global_safe_device = "cpu"
+                _global_cuda_available = False
+                _cuda_initialized = True
+                return _global_safe_device, _global_cuda_available
+            
+            # Test first device with safe operations
+            try:
+                # Create tensor on CPU first, then move to CUDA
+                test_tensor = torch.tensor([1.0, 2.0, 3.0])
+                test_tensor = test_tensor.to("cuda:0")
+                result = test_tensor * 2
+                del test_tensor, result
+                torch.cuda.empty_cache()
+                
+                _global_safe_device = "cuda:0"
+                _global_cuda_available = True
+                logger.info("✅ Global CUDA initialization successful")
+                
+            except Exception as cuda_test_error:
+                error_str = str(cuda_test_error)
+                if "INTERNAL ASSERT FAILED" in error_str:
+                    logger.warning(f"❌ CUDA driver test failed: {cuda_test_error}")
+                    logger.info("🔧 CUDA driver has issues, but trying to use it anyway for better performance")
+                    # Don't fall back to CPU immediately - try to use CUDA with caution
+                    _global_safe_device = "cuda:0"
+                    _global_cuda_available = True
+                    logger.info("⚠️ Using CUDA despite driver warnings - system will handle errors gracefully")
+                else:
+                    logger.warning(f"CUDA test failed: {cuda_test_error}")
+                    _global_safe_device = "cpu"
+                    _global_cuda_available = False
+            
+        except Exception as e:
+            logger.warning(f"Global CUDA initialization failed: {e}")
+            _global_safe_device = "cpu"
+            _global_cuda_available = False
+        
+        _cuda_initialized = True
+        return _global_safe_device, _global_cuda_available
+
+def get_validated_device() -> str:
+    """Get pre-validated device without triggering CUDA tests"""
+    global _cuda_initialized, _global_safe_device
+    
+    if not _cuda_initialized:
+        initialize_global_cuda()
+    
+    return _global_safe_device
+
+def is_cuda_available_global() -> bool:
+    """Check if CUDA is available without triggering tests"""
+    global _cuda_initialized, _global_cuda_available
+    
+    if not _cuda_initialized:
+        initialize_global_cuda()
+    
+    return _global_cuda_available
+
 # Global CUDA safety manager instance
 cuda_safety_manager = CUDASafetyManager()
 
 def get_safe_device() -> str:
     """Get the safest available device"""
-    return cuda_safety_manager.get_safe_device()
+    return get_validated_device()
 
 def get_device_info() -> Dict[str, Any]:
     """Get comprehensive device information"""
@@ -267,7 +392,7 @@ def force_cpu_mode():
 
 def is_cuda_safe() -> bool:
     """Check if CUDA is safe to use"""
-    return cuda_safety_manager.is_cuda_safe()
+    return is_cuda_available_global()
 
 @contextmanager
 def safe_device_context(device: Optional[str] = None):
@@ -279,3 +404,5 @@ def safe_device_context(device: Optional[str] = None):
 logger.info("CUDA Safety Manager initialized")
 device_info = get_device_info()
 logger.info(f"Device configuration: {device_info}")
+
+CUDA_Safety_Manager = CUDASafetyManager

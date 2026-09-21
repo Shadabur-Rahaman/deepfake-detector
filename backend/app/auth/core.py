@@ -27,7 +27,12 @@ from passlib.context import CryptContext
 from passlib.hash import bcrypt, argon2
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-import redis.asyncio as redis
+try:
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis = None
 
 from .models import User, UserSession, AuditLog, PasswordReset, Role
 from .exceptions import AuthenticationError, AuthorizationError

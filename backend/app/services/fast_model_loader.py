@@ -44,12 +44,13 @@ class FastModelLoader:
         if device == "auto":
             if torch and torch.cuda.is_available():
                 try:
-                    # Test CUDA with a simple operation to avoid driver errors - create on CPU first
-                    test_tensor = torch.tensor([1.0])  # Create on CPU first
-                    test_tensor = test_tensor.to("cuda")  # Move to CUDA safely
-                    del test_tensor
-                    torch.cuda.empty_cache()
-                    return torch.device("cuda")
+                    # Use centralized CUDA safety manager to avoid driver conflicts
+                    from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                    
+                    if is_cuda_available_global():
+                        return torch.device(get_validated_device())
+                    else:
+                        return torch.device("cpu")
                 except Exception as e:
                     error_str = str(e)
                     if "INTERNAL ASSERT FAILED" in error_str:

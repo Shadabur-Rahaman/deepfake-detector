@@ -3,7 +3,7 @@ import torch
 from typing import Dict, List
 import logging
 from app.services.enhanced_detector import enhanced_detector
-from app.utils.model_importer import MODEL_AVAILABILITY
+from backend.app.utils.model_importer import get_model_availability_cached
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,8 @@ class EnhancedDetectionEngine:
 
     def _load_available_models(self):
         global ENHANCED_DETECTION_AVAILABLE
-        if MODEL_AVAILABILITY.get('mesonet'):
+        model_availability = get_model_availability_cached()
+        if model_availability.get('mesonet'):
             try:
                 from app.models.mesonet_detector import MesoNetDetector
                 self.advanced_models['mesonet'] = MesoNetDetector()

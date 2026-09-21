@@ -7,6 +7,14 @@ import numpy as np
 from typing import List, Dict, Optional
 import logging
 
+# Import face data validator for type conversion
+try:
+    from .face_data_validator import FaceDataValidator
+    FACE_VALIDATOR_AVAILABLE = True
+except ImportError:
+    FACE_VALIDATOR_AVAILABLE = False
+    logger.warning("FaceDataValidator not available")
+
 logger = logging.getLogger(__name__)
 
 # Global instance for singleton pattern
@@ -153,8 +161,20 @@ class ModernAIContentDetector:
             try:
                 face_np = self._tensor_to_numpy_safe(face)
                 
+                # FIXED: Validate face before OpenCV operations
+                if FACE_VALIDATOR_AVAILABLE:
+                    validated_face = FaceDataValidator.validate_face_for_opencv(face_np, "modern_ai_pixel_analysis")
+                    if validated_face is not None:
+                        face_np = validated_face
+                    else:
+                        logger.warning("Face validation failed for pixel analysis")
+                        continue
+                elif not isinstance(face_np, np.ndarray) or face_np.ndim != 3:
+                    logger.warning(f"Invalid face format for OpenCV: {type(face_np)} {face_np.shape if hasattr(face_np, 'shape') else 'no shape'}")
+                    continue
+                
                 # Over-smoothing detection (common in diffusion models)
-                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+                gray = cv2.cvtColor(face_np, cv2.COLOR_BGR2GRAY)
                 laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
                 smoothing_score = 1.0 / (1.0 + laplacian_var / 50.0)  # More sensitive
                 
@@ -242,8 +262,20 @@ class ModernAIContentDetector:
             try:
                 face_np = self._tensor_to_numpy_safe(face)
                 
+                # FIXED: Validate face before OpenCV operations
+                if FACE_VALIDATOR_AVAILABLE:
+                    validated_face = FaceDataValidator.validate_face_for_opencv(face_np, "modern_ai_color_analysis")
+                    if validated_face is not None:
+                        face_np = validated_face
+                    else:
+                        logger.warning("Face validation failed for color analysis")
+                        continue
+                elif not isinstance(face_np, np.ndarray) or face_np.ndim != 3:
+                    logger.warning(f"Invalid face format for OpenCV: {type(face_np)} {face_np.shape if hasattr(face_np, 'shape') else 'no shape'}")
+                    continue
+                
                 # Analyze color saturation
-                hsv = cv2.cvtColor(face_np, cv2.COLOR_RGB2HSV)
+                hsv = cv2.cvtColor(face_np, cv2.COLOR_BGR2HSV)
                 saturation = np.mean(hsv[:, :, 1])
                 
                 # Midjourney often has higher saturation
@@ -302,27 +334,27 @@ class ModernAIContentDetector:
         
         # Weight the different components with rebalanced weights favoring real content
         final_score = (
-            pixel_artifacts * 0.28 +
-            temporal_artifacts * 0.22 +
-            frequency_artifacts * 0.18 +
-            np.mean(list(tool_scores.values())) * 0.17 +
-            0.15  # Real content baseline
+            pixel_artifacts * 0.25 +
+            temporal_artifacts * 0.20 +
+            frequency_artifacts * 0.15 +
+            np.mean(list(tool_scores.values())) * 0.15 +
+            0.25  # Increased real content baseline from 0.15 to 0.25
         )
         
         # Determine most likely tool
         likely_tool = max(tool_scores, key=tool_scores.get)
         
         # Make prediction with higher threshold and calibrated confidence
-        if final_score >= 0.65:  # Raised from 0.6 to 0.65
+        if final_score >= 0.70:  # Raised from 0.65 to 0.70 to further reduce false positives
             prediction = "Modern AI Generated Content"
-            confidence = min(final_score * 90 + 10, 95.0)  # Scaled: 65%→68.5%, 100%→95%
+            confidence = min(final_score * 85 + 15, 90.0)  # Reduced confidence for AI predictions
         else:
             prediction = "Authentic Content"
-            confidence = min((1.0 - final_score) * 85 + 10, 92.0)  # Real: 35%→39.75%, 0%→82%
+            confidence = min((1.0 - final_score) * 80 + 20, 90.0)  # Higher confidence for authentic content
         
         return {
             'prediction': prediction,
             'confidence': confidence,
-            'likely_tool': likely_tool if final_score >= 0.65 else 'none',
+            'likely_tool': likely_tool if final_score >= 0.70 else 'none',
             'ensemble_score': final_score
         }

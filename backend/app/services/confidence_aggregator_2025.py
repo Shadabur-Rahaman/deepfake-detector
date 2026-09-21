@@ -28,6 +28,116 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
+
+def to_fake_probability(prediction: str, confidence: float) -> float:
+    """
+    Convert label-confidence into P(fake) in [0, 1].
+
+    confidence is confidence in the predicted label, not fake probability:
+      FAKE + confidence c → fake_probability = c
+      REAL + confidence c → fake_probability = 1 - c
+    """
+    try:
+        conf = float(confidence) if confidence is not None else 0.5
+    except (TypeError, ValueError):
+        conf = 0.5
+    if not np.isfinite(conf):
+        conf = 0.5
+    conf = float(np.clip(conf, 0.0, 1.0))
+
+    pred = (prediction or "").lower()
+    if any(tok in pred for tok in ("real", "authentic", "genuine")):
+        return float(np.clip(1.0 - conf, 0.0, 1.0))
+    if any(tok in pred for tok in ("deepfake", "fake", "ai-generated", "ai generated", "manipulated")):
+        return conf
+    # Uncertain / unknown: treat confidence as already expressing fake lean if provided,
+    # otherwise stay neutral.
+    if "uncertain" in pred or "unknown" in pred or "error" in pred or not pred:
+        return 0.5
+    return conf
+
+
+def sanitize_weight(weight: Any, default: float = 1.0) -> float:
+    """Return a finite non-negative weight, or default if invalid."""
+    try:
+        w = float(weight) if weight is not None else default
+    except (TypeError, ValueError):
+        return default
+    if not np.isfinite(w) or w < 0.0:
+        return default
+    return w
+
+
+def normalize_named_weights(
+    model_names: List[str],
+    named_weights: Optional[Dict[str, float]] = None,
+    default: float = 1.0,
+) -> Dict[str, float]:
+    """
+    Normalize valid participating weights to sum to 1.0.
+
+    Invalid / zero / non-finite weights for a participant fall back to `default`.
+    If every weight is zero/invalid after sanitization, use equal weights.
+    """
+    if not model_names:
+        return {}
+
+    raw: Dict[str, float] = {}
+    for name in model_names:
+        if named_weights and name in named_weights:
+            raw[name] = sanitize_weight(named_weights[name], default=0.0)
+        else:
+            raw[name] = default
+
+    positive = {k: v for k, v in raw.items() if v > 0.0}
+    if not positive:
+        equal = 1.0 / len(model_names)
+        return {name: equal for name in model_names}
+
+    total = sum(positive.values())
+    if total <= 0.0 or not np.isfinite(total):
+        equal = 1.0 / len(model_names)
+        return {name: equal for name in model_names}
+
+    normalized = {name: 0.0 for name in model_names}
+    for name, w in positive.items():
+        normalized[name] = w / total
+    return normalized
+
+
+def compute_weighted_fake_probability(
+    model_predictions: Dict[str, Tuple[str, float]],
+    named_weights: Optional[Dict[str, float]] = None,
+) -> Tuple[float, Dict[str, float], Dict[str, float]]:
+    """
+    Weighted average of per-model fake probabilities.
+
+    Returns:
+        (ensemble_fake_probability, normalized_weights, per_model_fake_probs)
+    """
+    if not model_predictions:
+        return 0.5, {}, {}
+
+    names = list(model_predictions.keys())
+    weights = normalize_named_weights(names, named_weights)
+    per_model_fake: Dict[str, float] = {}
+    weighted_sum = 0.0
+    for name, (prediction, confidence) in model_predictions.items():
+        fake_p = to_fake_probability(prediction, confidence)
+        per_model_fake[name] = fake_p
+        weighted_sum += weights.get(name, 0.0) * fake_p
+
+    ensemble_fake = float(np.clip(weighted_sum, 0.0, 1.0))
+    return ensemble_fake, weights, per_model_fake
+
+
+def _prediction_key(key: Any) -> str:
+    """Preserve individual model identity; ModelType enums become their value string."""
+    if isinstance(key, Enum):
+        return str(key.value)
+    return str(key)
+
+
 def calculate_adaptive_weights(predictions: Dict[str, float], 
                                base_weights: Dict[str, float]) -> Dict[str, float]:
     """
@@ -381,116 +491,107 @@ class ConfidenceAggregator2025:
         return logits / 2.0
     
     def aggregate_ensemble_predictions(self, 
-                                     model_predictions: Dict[ModelType, Tuple[str, float]],
+                                     model_predictions: Dict[Any, Tuple[str, float]],
                                      face_quality: FaceQualityMetrics,
                                      temporal_metrics: TemporalConsistencyMetrics,
-                                     model_logits: Optional[Dict[ModelType, torch.Tensor]] = None) -> EnsemblePrediction:
+                                     model_logits: Optional[Dict[Any, torch.Tensor]] = None,
+                                     named_weights: Optional[Dict[str, float]] = None) -> EnsemblePrediction:
         """
         Advanced ensemble prediction aggregation with 2025 AI standards.
         
         Args:
-            model_predictions: Dict of model predictions
+            model_predictions: Dict keyed by individual model name (preferred) or ModelType
             face_quality: Face quality metrics
             temporal_metrics: Temporal consistency metrics
             model_logits: Optional raw model logits for logit aggregation
+            named_weights: Optional per-model weights keyed by the same names as predictions
             
         Returns:
             Comprehensive ensemble prediction
         """
         if not model_predictions:
             return self._create_default_prediction()
-        
-        # Step 1: Aggregate logits if available (preferred method)
-        if model_logits:
-            final_logits, logit_weights = self._aggregate_logits(model_logits)
-            probabilities = torch.sigmoid(final_logits).cpu().numpy()
-            avg_probability = np.mean(probabilities)
+
+        # Preserve individual model identity (no ModelType category collisions)
+        named_predictions: Dict[str, Tuple[str, float]] = {}
+        for key, value in model_predictions.items():
+            named_predictions[_prediction_key(key)] = value
+
+        # Resolve named weights: explicit override → category defaults for legacy ModelType keys
+        resolved_weights: Dict[str, float] = {}
+        if named_weights:
+            resolved_weights = dict(named_weights)
         else:
-            # Step 2: Weighted prediction aggregation
-            weighted_real_votes = 0.0
-            weighted_fake_votes = 0.0
-            total_weight = 0.0
-            individual_confidences = []
-            
-            for model_type, (prediction, confidence) in model_predictions.items():
-                if model_type not in self.model_weights:
-                    continue
-                
-                weight = self.model_weights[model_type]
-                
-                # Adjust confidence based on face quality
-                quality_adjusted_confidence = confidence * (0.7 + 0.3 * face_quality.overall_quality)
-                
-                if "real" in prediction.lower() or "authentic" in prediction.lower():
-                    weighted_real_votes += weight * quality_adjusted_confidence
-                else:
-                    weighted_fake_votes += weight * quality_adjusted_confidence
-                
-                total_weight += weight * quality_adjusted_confidence
-                individual_confidences.append(quality_adjusted_confidence)
-            
-            if total_weight == 0:
-                return self._create_default_prediction()
-            
-            # Calculate final ratios
-            real_ratio = weighted_real_votes / total_weight
-            fake_ratio = weighted_fake_votes / total_weight
-            avg_probability = fake_ratio  # Probability of being fake
+            for key in model_predictions.keys():
+                name = _prediction_key(key)
+                if isinstance(key, ModelType) and key in self.model_weights:
+                    resolved_weights[name] = float(self.model_weights[key])
         
-        # Step 3: Apply temporal consistency weighting
+        # Step 1: Aggregate logits if available (preferred method for calibration path)
+        individual_confidences: List[float] = []
+        if model_logits:
+            final_logits, logit_weights = self._aggregate_logits(model_logits, resolved_weights)
+            if final_logits is None:
+                avg_probability, used_weights, per_model_fake = compute_weighted_fake_probability(
+                    named_predictions, resolved_weights or None
+                )
+                individual_confidences = list(per_model_fake.values())
+            else:
+                probabilities = torch.sigmoid(final_logits).cpu().numpy()
+                avg_probability = float(np.clip(np.mean(probabilities), 0.0, 1.0))
+                used_weights = {
+                    _prediction_key(k): float(v) for k, v in logit_weights.items()
+                }
+                per_model_fake = {
+                    name: to_fake_probability(pred, conf)
+                    for name, (pred, conf) in named_predictions.items()
+                }
+                individual_confidences = list(per_model_fake.values())
+        else:
+            # Step 2: Named weighted fake-probability aggregation (label→P(fake) then weight)
+            avg_probability, used_weights, per_model_fake = compute_weighted_fake_probability(
+                named_predictions, resolved_weights or None
+            )
+            individual_confidences = list(per_model_fake.values())
+        
+        # Step 3: Temporal / quality factors adjust reported confidence only, not P(fake) arithmetic
         temporal_factor = (
             temporal_metrics.frame_consistency * self.temporal_weights['frame_consistency'] +
             temporal_metrics.transition_smoothness * self.temporal_weights['transition_smoothness'] +
             temporal_metrics.motion_consistency * self.temporal_weights['motion_consistency']
         )
         
-        # Step 4: Calculate final confidence with calibration and bias correction
-        base_confidence = avg_probability if avg_probability > 0.5 else 1.0 - avg_probability
+        fake_prob = float(np.clip(avg_probability, 0.0, 1.0))
+        # Soften confidence by quality/temporal without inverting the decision
+        confidence_scale = float(np.clip(
+            0.7 + 0.3 * float(face_quality.overall_quality) * float(temporal_factor),
+            0.0,
+            1.0,
+        ))
         
-        # ✅ AGGRESSIVE BIAS CORRECTION: Apply heavy bias correction to reduce false positives
-        # Reduce fake probability by 30% to heavily favor real content detection
-        bias_correction_factor = 0.70 if avg_probability > 0.5 else 1.30  # Heavily reduce fake confidence, boost real confidence
-        corrected_probability = avg_probability * bias_correction_factor if avg_probability > 0.5 else avg_probability
+        if fake_prob >= 0.5:
+            final_prediction = "Deepfake Detected"
+            final_confidence = fake_prob * confidence_scale
+        else:
+            final_prediction = "Real Video"
+            final_confidence = (1.0 - fake_prob) * confidence_scale
         
-        # Recalculate base confidence with bias correction
-        base_confidence = corrected_probability if corrected_probability > 0.5 else 1.0 - corrected_probability
-        calibrated_confidence = base_confidence * temporal_factor * face_quality.overall_quality
+        final_confidence = max(0.0, min(1.0, float(final_confidence)))
         
-        # ✅ UNCERTAINTY HANDLING: Check for invalid confidence values
-        if calibrated_confidence is None or calibrated_confidence < 0 or calibrated_confidence > 1:
+        if final_confidence < 0.3:
+            if abs(fake_prob - 0.5) < 0.1:
+                final_prediction = "Uncertain"
+            final_confidence = max(0.4, final_confidence * 1.2)
+        
+        if final_confidence is None or final_confidence < 0 or final_confidence > 1:
             logger.warning("Invalid confidence value detected, returning UNCERTAIN")
             return self._create_default_prediction()
         
-        # ✅ AGGRESSIVE BIAS FIX: Use extremely conservative thresholds to prevent false positives on real content
-        # Apply very conservative thresholds that heavily favor real content to reduce false positives
-        fake_threshold = 0.85  # Only classify as fake if >85% confidence (increased from 65%)
-        real_threshold = 0.15  # Classify as real if <15% confidence (decreased from 35%)
+        # Step 6: Calculate ensemble metrics (named keys)
+        model_agreement = self._calculate_model_agreement(named_predictions)
+        ensemble_variance = float(np.var(individual_confidences)) if individual_confidences else 0.0
+        uncertainty_estimate = self._calculate_uncertainty(named_predictions, individual_confidences)
         
-        # Use corrected probability for threshold decisions
-        if corrected_probability >= fake_threshold:
-            final_prediction = "Deepfake Detected"
-            # Apply confidence scaling for fake detection
-            final_confidence = calibrated_confidence * 1.1  # ✅ BIAS FIX: Remove 95% cap
-        elif corrected_probability <= real_threshold:
-            final_prediction = "Authentic Video"
-            # Apply confidence scaling for real detection
-            final_confidence = (1.0 - calibrated_confidence) * 1.2  # ✅ BIAS FIX: Remove 95% cap
-        else:
-            # Uncertain range (15-85%) - be extremely conservative and heavily favor real content
-            if corrected_probability > 0.75:  # Only classify as fake if >75% in uncertain range (increased from 55%)
-                final_prediction = "Deepfake Detected"
-                final_confidence = calibrated_confidence * 0.6  # Further reduce confidence for uncertain fake
-            else:
-                final_prediction = "Authentic Video"  # Default to real for uncertain cases
-                final_confidence = (1.0 - calibrated_confidence) * 1.5  # ✅ BIAS FIX: Remove 95% cap
-        
-        # Step 6: Calculate ensemble metrics
-        model_agreement = self._calculate_model_agreement(model_predictions)
-        ensemble_variance = np.var(individual_confidences) if individual_confidences else 0.0
-        uncertainty_estimate = self._calculate_uncertainty(model_predictions, individual_confidences)
-        
-        # ✅ STABILITY FIX: Remove uncertainty levels
-        # Use clear confidence levels without uncertainty
         confidence_percentage = final_confidence * 100
         if confidence_percentage >= 70:
             confidence_level = ConfidenceLevel.HIGH
@@ -499,12 +600,14 @@ class ConfidenceAggregator2025:
         else:
             confidence_level = ConfidenceLevel.VERY_LOW
         
-        # Step 8: Create detailed breakdown
         detailed_breakdown = {
-            'model_predictions': model_predictions,
+            'model_predictions': named_predictions,
+            'per_model_fake_probability': per_model_fake,
             'face_quality': face_quality.__dict__,
             'temporal_metrics': temporal_metrics.__dict__,
-            'model_weights': {k.value: v for k, v in self.model_weights.items()},
+            'model_weights': used_weights,
+            'named_weights_input': resolved_weights,
+            'fake_probability': fake_prob,
             'raw_probability': avg_probability,
             'temporal_factor': temporal_factor,
             'calibration_applied': model_logits is not None
@@ -519,39 +622,48 @@ class ConfidenceAggregator2025:
             uncertainty_estimate=uncertainty_estimate,
             face_quality_factor=face_quality.overall_quality,
             temporal_consistency=temporal_factor,
-            calibration_score=self._calculate_calibration_score(model_predictions),
+            calibration_score=self._calculate_calibration_score(named_predictions),
             detailed_breakdown=detailed_breakdown
         )
     
-    def _aggregate_logits(self, model_logits: Dict[ModelType, torch.Tensor]) -> Tuple[torch.Tensor, Dict[ModelType, float]]:
-        """Aggregate raw logits from multiple models with proper weighting"""
+    def _aggregate_logits(
+        self,
+        model_logits: Dict[Any, torch.Tensor],
+        named_weights: Optional[Dict[str, float]] = None,
+    ) -> Tuple[torch.Tensor, Dict[Any, float]]:
+        """Aggregate raw logits from multiple models with named (or category) weighting"""
+        names = [_prediction_key(k) for k in model_logits.keys()]
+        weights = normalize_named_weights(names, named_weights)
+
         weighted_logits = None
         total_weight = 0.0
-        logit_weights = {}
-        
-        for model_type, logits in model_logits.items():
-            if model_type not in self.model_weights:
+        logit_weights: Dict[Any, float] = {}
+
+        for key, logits in model_logits.items():
+            name = _prediction_key(key)
+            weight = weights.get(name, 0.0)
+            if weight <= 0.0:
                 continue
-            
-            weight = self.model_weights[model_type]
-            logit_weights[model_type] = weight
-            
-            # Apply temperature scaling
+
+            logit_weights[key] = weight
+
+            # Temperature scaling: use ModelType when available, else CUSTOM
+            model_type = key if isinstance(key, ModelType) else ModelType.CUSTOM
             calibrated_logits = self.apply_temperature_scaling(logits, model_type)
-            
+
             if weighted_logits is None:
                 weighted_logits = weight * calibrated_logits
             else:
                 weighted_logits += weight * calibrated_logits
-            
+
             total_weight += weight
-        
-        if total_weight > 0:
+
+        if weighted_logits is not None and total_weight > 0:
             weighted_logits = weighted_logits / total_weight
-        
+
         return weighted_logits, logit_weights
     
-    def _calculate_model_agreement(self, model_predictions: Dict[ModelType, Tuple[str, float]]) -> float:
+    def _calculate_model_agreement(self, model_predictions: Dict[str, Tuple[str, float]]) -> float:
         """Calculate agreement between models"""
         if not model_predictions:
             return 0.0
@@ -562,7 +674,7 @@ class ConfidenceAggregator2025:
         
         return max(real_count, fake_count) / len(predictions)
     
-    def _calculate_uncertainty(self, model_predictions: Dict[ModelType, Tuple[str, float]], 
+    def _calculate_uncertainty(self, model_predictions: Dict[str, Tuple[str, float]], 
                              confidences: List[float]) -> float:
         """Calculate uncertainty estimate using entropy and variance"""
         if not confidences:
@@ -588,7 +700,7 @@ class ConfidenceAggregator2025:
         
         return uncertainty
     
-    def _calculate_calibration_score(self, model_predictions: Dict[ModelType, Tuple[str, float]]) -> float:
+    def _calculate_calibration_score(self, model_predictions: Dict[str, Tuple[str, float]]) -> float:
         """Calculate overall calibration score for the ensemble"""
         if not model_predictions:
             return 0.0
@@ -596,12 +708,27 @@ class ConfidenceAggregator2025:
         total_score = 0.0
         total_weight = 0.0
         
-        for model_type, (_, confidence) in model_predictions.items():
-            if model_type in self.model_metrics:
-                metrics = self.model_metrics[model_type]
-                weight = self.model_weights.get(model_type, 0.0)
-                
-                # Calibration score based on calibration error
+        for name, (_, confidence) in model_predictions.items():
+            # Match category metrics when name hints at architecture
+            metrics = None
+            lower = name.lower()
+            if "efficientnet" in lower:
+                metrics = self.model_metrics.get(ModelType.EFFICIENTNET)
+                weight = self.model_weights.get(ModelType.EFFICIENTNET, 1.0)
+            elif "resnet" in lower:
+                metrics = self.model_metrics.get(ModelType.RESNET)
+                weight = self.model_weights.get(ModelType.RESNET, 1.0)
+            elif "transformer" in lower or "vit" in lower:
+                metrics = self.model_metrics.get(ModelType.VISION_TRANSFORMER)
+                weight = self.model_weights.get(ModelType.VISION_TRANSFORMER, 1.0)
+            elif "convnext" in lower:
+                metrics = self.model_metrics.get(ModelType.CONVNEXT)
+                weight = self.model_weights.get(ModelType.CONVNEXT, 1.0)
+            else:
+                metrics = self.model_metrics.get(ModelType.CUSTOM)
+                weight = self.model_weights.get(ModelType.CUSTOM, 1.0)
+
+            if metrics is not None:
                 calibration_score = max(0.0, 1.0 - metrics.calibration_error)
                 total_score += weight * calibration_score
                 total_weight += weight
@@ -702,13 +829,15 @@ class ConfidenceAggregator2025:
         Returns:
             Formatted dictionary for API response
         """
-        confidence_percentage = result.confidence * 100
+        conf = result.confidence if result.confidence is not None else 0.0
+        confidence_percentage = conf * 100
         
         # Create interpretable output
         output = {
             "prediction": result.prediction,
             "confidence_percentage": round(confidence_percentage, 1),
             "confidence_level": result.confidence_level.name,
+            "fake_probability": result.detailed_breakdown.get("fake_probability"),
             "interpretable_output": {
                 "model_agreement": f"{result.model_agreement * 100:.1f}%",
                 "ensemble_variance": f"{result.ensemble_variance:.3f}",
@@ -739,40 +868,63 @@ async def aggregate_ensemble_confidence_2025(
     model_predictions: Dict[str, Tuple[str, float]],
     faces: List[np.ndarray],
     yolo_confidences: Optional[List[float]] = None,
-    frame_predictions: Optional[List[Tuple[str, float]]] = None
+    frame_predictions: Optional[List[Tuple[str, float]]] = None,
+    named_weights: Optional[Dict[str, float]] = None,
 ) -> Dict[str, Any]:
     """
     Convenience function for ensemble confidence aggregation.
     
-    Args:
-        model_predictions: Dict of model predictions
-        faces: List of face images
-        yolo_confidences: Optional YOLO confidences
-        frame_predictions: Optional frame predictions
-        
-    Returns:
-        Formatted prediction result
+    Preserves individual model names (no ModelType category collisions).
+    Optional named_weights are forwarded into aggregation.
     """
-    # Convert string model names to ModelType enum
-    typed_predictions = {}
-    for model_name, (pred, conf) in model_predictions.items():
-        if "efficientnet" in model_name.lower():
-            typed_predictions[ModelType.EFFICIENTNET] = (pred, conf)
-        elif "resnet" in model_name.lower():
-            typed_predictions[ModelType.RESNET] = (pred, conf)
-        elif "transformer" in model_name.lower() or "vit" in model_name.lower():
-            typed_predictions[ModelType.VISION_TRANSFORMER] = (pred, conf)
-        elif "convnext" in model_name.lower():
-            typed_predictions[ModelType.CONVNEXT] = (pred, conf)
-        else:
-            typed_predictions[ModelType.CUSTOM] = (pred, conf)
-    
-    # Process with the aggregator
-    result = await confidence_aggregator_2025.process_video_ensemble(
-        faces, yolo_confidences, frame_predictions
+    face_quality = confidence_aggregator_2025.assess_face_quality(faces, yolo_confidences)
+    if frame_predictions:
+        temporal_metrics = confidence_aggregator_2025.analyze_temporal_consistency(frame_predictions)
+    else:
+        temporal_metrics = TemporalConsistencyMetrics(1.0, 1.0, 1.0, 0.0)
+
+    result = confidence_aggregator_2025.aggregate_ensemble_predictions(
+        model_predictions,
+        face_quality,
+        temporal_metrics,
+        named_weights=named_weights,
     )
     
     return confidence_aggregator_2025.format_prediction_output(result)
+
+
+def aggregate_hybrid_detection_scores(
+    detection_scores: List[Tuple[str, float, float]],
+) -> Tuple[float, Dict[str, float]]:
+    """
+    Aggregate hybrid component scores that are already fake probabilities.
+
+    detection_scores: list of (component_name, fake_probability, weight)
+    Returns (ensemble_fake_probability, normalized_weights).
+    """
+    if not detection_scores:
+        return 0.5, {}
+
+    names = [name for name, _, _ in detection_scores]
+    raw_weights = {name: weight for name, _, weight in detection_scores}
+    clamped: Dict[str, float] = {}
+    for name, score, _ in detection_scores:
+        try:
+            s = float(score)
+        except (TypeError, ValueError):
+            s = 0.5
+        if not np.isfinite(s):
+            s = 0.5
+        clamped[name] = float(np.clip(s, 0.0, 1.0))
+
+    weights = normalize_named_weights(names, raw_weights)
+    ensemble = float(np.clip(
+        sum(weights[n] * clamped[n] for n in names),
+        0.0,
+        1.0,
+    ))
+    return ensemble, weights
+
 
 def get_confidence_level_description(level: ConfidenceLevel) -> str:
     """Get human-readable description of confidence level"""

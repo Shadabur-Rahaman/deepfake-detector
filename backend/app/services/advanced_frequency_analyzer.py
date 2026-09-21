@@ -6,6 +6,14 @@ from scipy.fftpack import fft2, fftshift
 from typing import List, Dict
 import logging
 
+# Import face data validator for type conversion
+try:
+    from .face_data_validator import FaceDataValidator
+    FACE_VALIDATOR_AVAILABLE = True
+except ImportError:
+    FACE_VALIDATOR_AVAILABLE = False
+    logger.warning("FaceDataValidator not available")
+
 logger = logging.getLogger(__name__)
 
 class AdvancedFrequencyAnalyzer:
@@ -51,7 +59,20 @@ class AdvancedFrequencyAnalyzer:
         for face in faces[:5]:
             try:
                 face_np = self._tensor_to_numpy(face)
-                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+                
+                # FIXED: Validate face before OpenCV operations
+                if FACE_VALIDATOR_AVAILABLE:
+                    validated_face = FaceDataValidator.validate_face_for_opencv(face_np, "frequency_fft_analysis")
+                    if validated_face is not None:
+                        face_np = validated_face
+                    else:
+                        logger.warning("Face validation failed for FFT analysis")
+                        continue
+                elif not isinstance(face_np, np.ndarray) or face_np.ndim != 3:
+                    logger.warning(f"Invalid face format for OpenCV: {type(face_np)} {face_np.shape if hasattr(face_np, 'shape') else 'no shape'}")
+                    continue
+                
+                gray = cv2.cvtColor(face_np, cv2.COLOR_BGR2GRAY)
                 
                 # 2D FFT analysis
                 f_transform = fft2(gray)
@@ -113,7 +134,20 @@ class AdvancedFrequencyAnalyzer:
             for face in faces[:3]:
                 try:
                     face_np = self._tensor_to_numpy(face)
-                    gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+                    
+                    # FIXED: Validate face before OpenCV operations
+                    if FACE_VALIDATOR_AVAILABLE:
+                        validated_face = FaceDataValidator.validate_face_for_opencv(face_np, "frequency_wavelet_analysis")
+                        if validated_face is not None:
+                            face_np = validated_face
+                        else:
+                            logger.warning("Face validation failed for wavelet analysis")
+                            continue
+                    elif not isinstance(face_np, np.ndarray) or face_np.ndim != 3:
+                        logger.warning(f"Invalid face format for OpenCV: {type(face_np)} {face_np.shape if hasattr(face_np, 'shape') else 'no shape'}")
+                        continue
+                    
+                    gray = cv2.cvtColor(face_np, cv2.COLOR_BGR2GRAY)
 
                     # FIXED: Use correct parameter name 'level' instead of 'levels'
                     coeffs = pywt.wavedec2(gray, 'db4', level=4)  # Changed from levels=4
@@ -150,7 +184,20 @@ class AdvancedFrequencyAnalyzer:
         for face in faces[:3]:
             try:
                 face_np = self._tensor_to_numpy(face)
-                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+                
+                # FIXED: Validate face before OpenCV operations
+                if FACE_VALIDATOR_AVAILABLE:
+                    validated_face = FaceDataValidator.validate_face_for_opencv(face_np, "frequency_dct_analysis")
+                    if validated_face is not None:
+                        face_np = validated_face
+                    else:
+                        logger.warning("Face validation failed for DCT analysis")
+                        continue
+                elif not isinstance(face_np, np.ndarray) or face_np.ndim != 3:
+                    logger.warning(f"Invalid face format for OpenCV: {type(face_np)} {face_np.shape if hasattr(face_np, 'shape') else 'no shape'}")
+                    continue
+                
+                gray = cv2.cvtColor(face_np, cv2.COLOR_BGR2GRAY)
                 
                 # Apply DCT in 8x8 blocks
                 h, w = gray.shape
@@ -196,7 +243,20 @@ class AdvancedFrequencyAnalyzer:
         for face in faces[:3]:
             try:
                 face_np = self._tensor_to_numpy(face)
-                gray = cv2.cvtColor(face_np, cv2.COLOR_RGB2GRAY)
+                
+                # FIXED: Validate face before OpenCV operations
+                if FACE_VALIDATOR_AVAILABLE:
+                    validated_face = FaceDataValidator.validate_face_for_opencv(face_np, "frequency_spectral_analysis")
+                    if validated_face is not None:
+                        face_np = validated_face
+                    else:
+                        logger.warning("Face validation failed for spectral analysis")
+                        continue
+                elif not isinstance(face_np, np.ndarray) or face_np.ndim != 3:
+                    logger.warning(f"Invalid face format for OpenCV: {type(face_np)} {face_np.shape if hasattr(face_np, 'shape') else 'no shape'}")
+                    continue
+                
+                gray = cv2.cvtColor(face_np, cv2.COLOR_BGR2GRAY)
                 
                 # FFT
                 f_transform = np.fft.fft2(gray)

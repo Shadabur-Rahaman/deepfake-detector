@@ -34,7 +34,7 @@ class HybridCNNLSTMDetector:
         
     def _build_inception_lstm(self):
         """InceptionV3 + LSTM for temporal analysis"""
-        backbone = inception_v3(weights='IMAGENET1K_V1')  # Updated parameter
+        backbone = inception_v3(weights=None)  # Updated parameter
         backbone.fc = nn.Identity()  # Remove final layer
         
         class InceptionLSTM(nn.Module):

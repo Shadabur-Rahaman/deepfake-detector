@@ -69,7 +69,7 @@ class HybridCNNLSTMDetector:
         """EfficientNet + LSTM for temporal analysis"""
         from torchvision.models import efficientnet_b0
         
-        backbone = efficientnet_b0(weights='IMAGENET1K_V1')  # Updated parameter
+        backbone = efficientnet_b0(weights=None)  # Updated parameter
         backbone.classifier = nn.Identity()  # Remove classifier
         
         class EfficientNetLSTM(nn.Module):

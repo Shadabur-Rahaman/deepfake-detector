@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useAuth } from '@/contexts/SimpleAuthContext';
 import SimpleAuthModal from '@/components/auth/SimpleAuthModal';
 import { AdminNotificationBell } from '@/components/admin/AdminNotificationBell';
+import { EnhancedNotificationBell } from '@/components/admin/EnhancedNotificationBell';
 import { User, LogOut, Menu, X, Shield } from 'lucide-react';
 
 const navigationItems = [
@@ -14,6 +15,7 @@ const navigationItems = [
   { name: 'Features', path: '/features' },
   { name: 'Try It', path: '/try' },
   { name: 'Detection', path: '/detection' },
+  // { name: 'Super Advanced', path: '/super-advanced' },
   { name: 'Blog', path: '/blog' },
   { name: 'API Docs', path: '/api' },
   { name: 'Contact', path: '/contact' }
@@ -87,7 +89,7 @@ export const Header = () => {
                 <div className="flex items-center space-x-2 lg:space-x-3">
                   {/* Admin Notification Bell */}
                   {user.roles?.includes('admin') && (
-                    <AdminNotificationBell />
+                    <EnhancedNotificationBell showStats={false} />
                   )}
 
                   {/* User Info - Desktop */}

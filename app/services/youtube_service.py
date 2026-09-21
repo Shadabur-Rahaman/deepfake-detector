@@ -1,4 +1,4 @@
-# app/services/youtube_service.py - COMPLETE 403 FIX SOLUTION
+# app/services/youtube_service.py - OPTIMIZED FOR SPEED AND EFFICIENCY
 
 import os
 import uuid
@@ -8,7 +8,8 @@ import subprocess
 import time
 import random
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -21,24 +22,32 @@ except ImportError:
     print("⚠️ yt-dlp not available")
 
 class YouTubeDownloader:
-    """ULTIMATE: Anti-403 YouTube downloader with advanced blocking workarounds"""
+    """OPTIMIZED: Fast YouTube downloader with intelligent caching and minimal delays"""
     
     def __init__(self):
         self.download_dir = Path("downloaded_videos")
         self.download_dir.mkdir(exist_ok=True)
         
-        # Clear yt-dlp cache on startup to prevent 403 errors
-        self._clear_yt_dlp_cache()
+        # Cache for successful strategies to avoid retrying failed ones
+        self.strategy_cache = {}
+        self.cache_cleared = False
+        
+        # Only clear cache once on startup, not on every download
+        self._clear_yt_dlp_cache_once()
         print(f"✅ YouTubeDownloader initialized, download_dir: {self.download_dir}")
 
-    def _clear_yt_dlp_cache(self):
-        """Clear yt-dlp cache to prevent 403 errors"""
+    def _clear_yt_dlp_cache_once(self):
+        """Clear yt-dlp cache only once on startup"""
+        if self.cache_cleared:
+            return
+            
         try:
             if YOUTUBE_AVAILABLE:
                 # Clear cache using yt-dlp command
                 subprocess.run(['yt-dlp', '--rm-cache-dir'], 
                              capture_output=True, text=True, check=False)
                 logger.info("🧹 Cleared yt-dlp cache to prevent 403 errors")
+                self.cache_cleared = True
         except Exception as e:
             logger.debug(f"Cache clear attempt: {e}")
 
@@ -116,12 +125,15 @@ class YouTubeDownloader:
         
         return url
 
-    def get_anti_403_ydl_opts(self, video_id: str) -> list:
-        """ANTI-403: Multiple yt-dlp configurations to bypass YouTube blocking"""
+    def get_optimized_ydl_opts(self, video_id: str, yt_video_id: str) -> list:
+        """OPTIMIZED: Fast yt-dlp configurations with intelligent strategy selection"""
         
         safe_template = f"{video_id}_%(title).50s.%(ext)s"
         
-        # Base configuration with anti-blocking measures
+        # Optimized User-Agent (single, most reliable)
+        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        
+        # Base configuration optimized for speed
         base_config = {
             'outtmpl': str(self.download_dir / safe_template),
             'max_filesize': 200 * 1024 * 1024,  # 200MB
@@ -134,94 +146,87 @@ class YouTubeDownloader:
             'quiet': False,
             'skip_unavailable_fragments': True,
             'restrictfilenames': True,
-            'retries': 10,  # More retries for 403 errors
-            'socket_timeout': 60,
+            'retries': 3,  # Reduced retries for faster failure detection
+            'socket_timeout': 30,  # Reduced timeout for faster failure
             'prefer_free_formats': True,
+            'fragment_retries': 3,  # Reduced fragment retries
             
-            # ANTI-403: Advanced headers rotation
+            # Optimized headers
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': user_agent,
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Cache-Control': 'max-age=0'
             },
             
-            # ANTI-403: Anti-bot detection
-            'sleep_interval': random.uniform(1, 3),
-            'max_sleep_interval': 5,
-            'sleep_interval_subtitles': 1,
+            # Minimal delays for speed
+            'sleep_interval': 0.5,
+            'max_sleep_interval': 1,
+            'sleep_interval_subtitles': 0.1,
+            'sleep_interval_requests': 0.1,
         }
 
-        # Strategy configurations in order of preference
-        strategies = [
-            # Strategy 1: Ultra-safe single format
+        # Check cache for this video ID to skip failed strategies
+        cache_key = hashlib.md5(yt_video_id.encode()).hexdigest()
+        failed_strategies = self.strategy_cache.get(cache_key, set())
+        
+        # Optimized strategies (reduced from 6 to 3 most effective ones)
+        all_strategies = [
+            # Strategy 1: Android mobile (most reliable and fast)
             {
                 **base_config,
-                'format': 'worst[ext=mp4]/worst',  # Least demanding format
-                'description': 'Ultra-safe lowest quality',
-            },
-            
-            # Strategy 2: Web client simulation
-            {
-                **base_config,
-                'format': 'best[height<=480][ext=mp4]/best[height<=360]',
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web'],
-                        'player_skip': ['dash', 'hls']
-                    }
-                },
-                'description': 'Web client 480p max',
-            },
-            
-            # Strategy 3: Android client simulation
-            {
-                **base_config,
-                'format': 'best[height<=720]',
+                'format': '18/22/36',  # Mobile formats
                 'extractor_args': {
                     'youtube': {
                         'player_client': ['android'],
                     }
                 },
-                'description': 'Android client',
+                'description': 'Android mobile format',
+                'priority': 1
             },
             
-            # Strategy 4: iOS client simulation
+            # Strategy 2: Web client optimized
             {
                 **base_config,
-                'format': 'best',
+                'format': 'best[height<=720][ext=mp4]/best[height<=480][ext=mp4]/best[ext=mp4]',
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['ios'],
+                        'player_client': ['web'],
                     }
                 },
-                'description': 'iOS client',
+                'description': 'Web client optimized',
+                'priority': 2
             },
             
-            # Strategy 5: Mediaconnect fallback
+            # Strategy 3: Emergency fallback
             {
                 **base_config,
-                'format': 'best',
+                'format': 'worst[ext=mp4]/worst',
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['mediaconnect'],
+                        'player_client': ['web'],
                     }
                 },
-                'description': 'MediaConnect client',
+                'description': 'Emergency fallback',
+                'priority': 3
             }
         ]
         
-        return strategies
+        # Filter out previously failed strategies
+        strategies = [s for s in all_strategies if s['priority'] not in failed_strategies]
+        
+        # If all strategies failed before, reset cache and try all
+        if not strategies:
+            logger.info(f"Resetting strategy cache for video {yt_video_id}")
+            self.strategy_cache.pop(cache_key, None)
+            strategies = all_strategies
+        
+        return strategies, cache_key
 
     async def download_video(self, youtube_url: str) -> Tuple[str, str, Dict]:
-        """ANTI-403: Download with advanced blocking workarounds"""
+        """OPTIMIZED: Fast download with intelligent strategy selection and caching"""
         
         if not YOUTUBE_AVAILABLE:
             raise ImportError("yt-dlp not installed. Install with: pip install yt-dlp")
@@ -229,13 +234,7 @@ class YouTubeDownloader:
         video_id = str(uuid.uuid4())
         
         try:
-            # Clear cache before each download
-            self._clear_yt_dlp_cache()
-            
-            # Add random delay to avoid rate limiting
-            time.sleep(random.uniform(1, 3))
-            
-            # URL processing
+            # URL processing (optimized - no unnecessary delays)
             original_url = youtube_url.strip()
             logger.info(f"🔍 Processing URL: {original_url}")
             
@@ -243,58 +242,51 @@ class YouTubeDownloader:
                 raise ValueError("Invalid YouTube URL format")
             
             yt_video_id = self.extract_video_id(original_url)
-            normalized_url = self.normalize_url(original_url)
             clean_url = self.create_clean_url(yt_video_id)
             
             logger.info(f"📝 Original URL: {original_url}")
-            logger.info(f"📝 Normalized URL: {normalized_url}")
             logger.info(f"📝 Clean URL: {clean_url}")
             logger.info(f"📝 Video ID: {yt_video_id}")
             
-            # Get anti-403 strategies
-            strategies = self.get_anti_403_ydl_opts(video_id)
+            # Get optimized strategies with caching
+            strategies, cache_key = self.get_optimized_ydl_opts(video_id, yt_video_id)
             
             info = None
             downloaded_file = None
             successful_strategy = None
             
-            # Try each strategy
+            # Try each strategy (optimized loop)
             for strategy_idx, strategy in enumerate(strategies):
                 logger.info(f"🎯 Strategy {strategy_idx + 1}/{len(strategies)}: {strategy.get('description')}")
                 
                 try:
                     # Clean strategy options
-                    ydl_opts = {k: v for k, v in strategy.items() if k != 'description'}
+                    ydl_opts = {k: v for k, v in strategy.items() if k not in ['description', 'priority']}
                     
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        # Try extract info first
+                        # Combined extract and download for speed
                         try:
-                            logger.info(f"📊 Extracting info with strategy {strategy_idx + 1}")
-                            info = ydl.extract_info(clean_url, download=False)
+                            logger.info(f"📊 Extracting and downloading with strategy {strategy_idx + 1}")
+                            info = ydl.extract_info(clean_url, download=True)
                             
                             if not info:
+                                # Mark strategy as failed
+                                self.strategy_cache.setdefault(cache_key, set()).add(strategy['priority'])
                                 continue
                                 
                             # Check video availability
                             availability = info.get('availability', 'public')
                             if availability in ['private', 'premium_only', 'subscriber_only', 'needs_auth']:
                                 logger.warning(f"Video is {availability}")
+                                self.strategy_cache.setdefault(cache_key, set()).add(strategy['priority'])
                                 continue
                                 
                             # Check for geo-blocking
                             if 'not available' in str(info.get('title', '')).lower():
                                 logger.warning("Video appears to be geo-blocked")
+                                self.strategy_cache.setdefault(cache_key, set()).add(strategy['priority'])
                                 continue
                                 
-                        except Exception as extract_error:
-                            logger.warning(f"Extract failed for strategy {strategy_idx + 1}: {extract_error}")
-                            continue
-                        
-                        # Try download
-                        try:
-                            logger.info(f"📥 Downloading with strategy {strategy_idx + 1}")
-                            ydl.extract_info(clean_url, download=True)
-                            
                             # Find downloaded file
                             for file in self.download_dir.glob(f"{video_id}_*"):
                                 if file.is_file() and file.suffix.lower() in ('.mp4', '.webm', '.mkv', '.m4a', '.avi', '.mov'):
@@ -308,9 +300,12 @@ class YouTubeDownloader:
                                 
                         except Exception as download_error:
                             error_str = str(download_error).lower()
+                            # Mark strategy as failed
+                            self.strategy_cache.setdefault(cache_key, set()).add(strategy['priority'])
+                            
                             if '403' in error_str or 'forbidden' in error_str:
                                 logger.warning(f"403 error with strategy {strategy_idx + 1}, trying next...")
-                                time.sleep(random.uniform(2, 5))  # Longer delay after 403
+                                time.sleep(0.5)  # Minimal delay after 403
                                 continue
                             else:
                                 logger.warning(f"Download failed for strategy {strategy_idx + 1}: {download_error}")
@@ -318,11 +313,12 @@ class YouTubeDownloader:
                                 
                 except Exception as strategy_error:
                     logger.warning(f"Strategy {strategy_idx + 1} completely failed: {strategy_error}")
+                    self.strategy_cache.setdefault(cache_key, set()).add(strategy['priority'])
                     continue
             
             # Check if we succeeded
             if not downloaded_file or not info:
-                # Final emergency attempt with subprocess
+                # Final emergency attempt with subprocess (optimized)
                 logger.info("🚨 All strategies failed, trying emergency subprocess method")
                 try:
                     emergency_file = await self._emergency_download(clean_url, video_id)
@@ -342,15 +338,19 @@ class YouTubeDownloader:
             if not downloaded_file:
                 raise ValueError("All download strategies failed. Video may be geo-blocked, private, or YouTube is blocking all requests.")
 
-            # Verify file can be opened by OpenCV
-            import cv2
-            cap = cv2.VideoCapture(downloaded_file)
-            if not cap.isOpened():
+            # Verify file can be opened by OpenCV (optimized check)
+            try:
+                import cv2
+                cap = cv2.VideoCapture(downloaded_file)
+                if not cap.isOpened():
+                    cap.release()
+                    raise ValueError(f"Downloaded video file cannot be processed: {downloaded_file}")
                 cap.release()
-                raise ValueError(f"Downloaded video file cannot be processed: {downloaded_file}")
-            cap.release()
+            except ImportError:
+                # Skip OpenCV check if not available
+                pass
 
-            # Create metadata
+            # Create metadata (optimized)
             duration = info.get('duration', 0)
             is_short = ('/shorts/' in original_url.lower() or (duration and duration <= 60))
 
@@ -361,7 +361,6 @@ class YouTubeDownloader:
                 'view_count': info.get('view_count', 0),
                 'upload_date': info.get('upload_date', 'Unknown'),
                 'original_url': original_url,
-                'normalized_url': normalized_url,
                 'cleaned_url': clean_url,
                 'video_id': yt_video_id,
                 'is_short': is_short,
@@ -383,29 +382,47 @@ class YouTubeDownloader:
             raise ValueError(f"Failed to download YouTube content: {str(e)}")
 
     async def _emergency_download(self, url: str, video_id: str) -> str:
-        """Emergency download using subprocess with minimal options"""
+        """OPTIMIZED: Emergency download using subprocess with faster options"""
         try:
             output_path = self.download_dir / f"{video_id}_emergency.%(ext)s"
             
+            # Optimized emergency command for speed
             cmd = [
                 'yt-dlp',
                 '--no-check-certificate',
                 '--no-warnings',
                 '--ignore-errors',
-                '--format', 'worst',
+                '--format', '18/22/36/worst',  # Try mobile formats first
                 '--output', str(output_path),
+                '--retries', '2',  # Reduced retries for speed
+                '--socket-timeout', '15',  # Reduced timeout
+                '--fragment-retries', '1',  # Reduced fragment retries
+                '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                '--sleep-interval', '0.5',  # Minimal sleep
+                '--max-sleep-interval', '1',
                 url
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            logger.info("🚨 Attempting emergency subprocess download...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)  # Reduced timeout
+            
+            if result.returncode == 0:
+                logger.info("✅ Emergency download completed successfully")
+            else:
+                logger.warning(f"Emergency download returned code {result.returncode}")
             
             # Find the downloaded file
             for file in self.download_dir.glob(f"{video_id}_emergency.*"):
-                if file.is_file():
+                if file.is_file() and file.stat().st_size > 1024:  # At least 1KB
+                    logger.info(f"✅ Found emergency download: {file}")
                     return str(file)
                     
+            logger.warning("No valid emergency download file found")
             return None
             
+        except subprocess.TimeoutExpired:
+            logger.error("Emergency download timed out")
+            return None
         except Exception as e:
             logger.error(f"Emergency download failed: {e}")
             return None
@@ -422,7 +439,7 @@ class YouTubeDownloader:
 # Global singleton
 if YOUTUBE_AVAILABLE:
     youtube_downloader = YouTubeDownloader()
-    print("✅ YouTube downloader instance created with advanced anti-403 protection")
+    print("✅ YouTube downloader instance created with optimized speed and efficiency")
 else:
     youtube_downloader = None
     print("⚠️ YouTube downloader not available")

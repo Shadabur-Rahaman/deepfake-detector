@@ -18,6 +18,7 @@ Date: 2024
 import asyncio
 import logging
 import time
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,6 +30,14 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from collections import deque
 logger = logging.getLogger(__name__)
+
+# Import face data validator for type conversion
+try:
+    from .face_data_validator import FaceDataValidator
+    FACE_VALIDATOR_AVAILABLE = True
+except ImportError:
+    FACE_VALIDATOR_AVAILABLE = False
+    logger.warning("FaceDataValidator not available")
 
 # Handle timm import compatibility issue with Python 3.13
 try:
@@ -113,31 +122,57 @@ class ResNetDetector:
         try:
             # Use optimal device with fallback to CPU
             try:
-                from services.cuda_safety_manager import get_safe_device
+                from backend.app.services.cuda_safety_manager import get_safe_device
                 optimal_device = get_safe_device()
             except ImportError:
                 optimal_device = "cuda" if torch.cuda.is_available() else "cpu"
             
-            if self.variant == 'resnet50':
-                self.model = models.resnet50(pretrained=True)
-            elif self.variant == 'resnet101':
-                self.model = models.resnet101(pretrained=True)
-            elif self.variant == 'resnet152':
-                self.model = models.resnet152(pretrained=True)
-            else:
-                raise ValueError(f"Unsupported ResNet variant: {self.variant}")
-            
-            # Modify for binary classification
-            num_features = self.model.fc.in_features
-            self.model.fc = nn.Linear(num_features, 2)
-            
-            # Load custom weights if available
+            # Load with ImageNet pre-trained weights using new API with fallback
             try:
-                checkpoint = torch.load(f'model_weights/{self.variant}_deepfake.pth', map_location=optimal_device)
-                self.model.load_state_dict(checkpoint)
-                logger.info(f"Using pretrained {self.variant} weights")
-            except:
-                logger.info(f"Using pretrained {self.variant} weights")
+                if self.variant == 'resnet50':
+                    self.model = models.resnet50(weights='IMAGENET1K_V2')
+                elif self.variant == 'resnet101':
+                    self.model = models.resnet101(weights='IMAGENET1K_V2')
+                elif self.variant == 'resnet152':
+                    self.model = models.resnet152(weights='IMAGENET1K_V2')
+                else:
+                    raise ValueError(f"Unsupported ResNet variant: {self.variant}")
+                logger.info(f"✅ {self.variant} loaded with ImageNet weights")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to load {self.variant} with ImageNet weights: {e}")
+                # Fallback to no weights
+                if self.variant == 'resnet50':
+                    self.model = models.resnet50(weights=None)
+                elif self.variant == 'resnet101':
+                    self.model = models.resnet101(weights=None)
+                elif self.variant == 'resnet152':
+                    self.model = models.resnet152(weights=None)
+                logger.warning(f"⚠️ {self.variant} loaded without pre-trained weights")
+            
+            # Replace final layer for binary classification with improved architecture
+            num_features = self.model.fc.in_features
+            self.model.fc = nn.Sequential(
+                nn.BatchNorm1d(num_features),
+                nn.Dropout(0.3),  # Reduced dropout for better learning
+                nn.Linear(num_features, 512),
+                nn.ReLU(),
+                nn.BatchNorm1d(512),
+                nn.Dropout(0.2),
+                nn.Linear(512, 1),
+                nn.Sigmoid()
+            )
+            
+            # Try loading fine-tuned weights if available
+            weights_path = f'model_weights/{self.variant}_deepfake.pth'
+            if os.path.exists(weights_path):
+                try:
+                    self.model.load_state_dict(torch.load(weights_path, map_location=optimal_device))
+                    logger.info(f"✅ Loaded fine-tuned {self.variant} weights")
+                except Exception as e:
+                    logger.warning(f"Failed to load fine-tuned weights: {e}")
+                    logger.info(f"Using ImageNet pre-trained {self.variant} weights")
+            else:
+                logger.info(f"Using ImageNet pre-trained {self.variant} weights (no fine-tuned weights found)")
             
             self.model.eval()
             
@@ -171,9 +206,26 @@ class ResNetDetector:
                     error_message="Model not loaded"
                 )
             
+            # FIXED: Validate faces before processing
+            validated_faces = faces
+            if FACE_VALIDATOR_AVAILABLE:
+                validated_faces = FaceDataValidator.validate_face_list(faces, f"resnet_{self.variant}_predict")
+                if not validated_faces:
+                    return ModelPrediction(
+                        model_name=self.variant,
+                        prediction="Face Validation Failed",
+                        confidence=0.0,
+                        raw_output=0.0,
+                        processing_time=time.time() - start_time,
+                        success=False,
+                        error_message="No valid faces after validation"
+                    )
+            else:
+                logger.warning(f"[ResNetDetector] FaceDataValidator not available for {self.variant}")
+            
             # Preprocess faces
             processed_faces = []
-            for face in faces:
+            for face in validated_faces:
                 try:
                     # Convert tensor to numpy if needed
                     face_np = _convert_tensor_to_numpy(face)
@@ -202,22 +254,49 @@ class ResNetDetector:
             # Make prediction
             with torch.no_grad():
                 outputs = self.model(batch)
-                probabilities = F.softmax(outputs, dim=1)
+                # Model now outputs sigmoid values, no need for softmax
                 
                 # Calculate average probability across batch
-                avg_prob = torch.mean(probabilities, dim=0)
-                fake_prob = avg_prob[1].item()  # Assuming class 1 is fake
+                avg_prob = torch.mean(outputs, dim=0)
+                fake_prob = avg_prob[0].item()  # Model now outputs single value with sigmoid
                 
-                # Determine prediction
-                if fake_prob > 0.7:
+                # Debug logging
+                logger.info(f"[{self.variant}] Raw fake_prob: {fake_prob:.4f}")
+                
+                # ✅ IMPROVED PREDICTION LOGIC: More aggressive deepfake detection
+                # Apply temperature scaling to make predictions more extreme
+                temperature = 3.0  # Higher temperature for more aggressive detection
+                scaled_prob = 1.0 / (1.0 + np.exp(-temperature * (fake_prob - 0.5) * 6))
+                
+                # Calculate batch variance for confidence estimation
+                batch_variance = torch.var(outputs).item()
+                confidence_boost = max(0.0, 1.0 - batch_variance * 5)  # Less penalty for variance
+                
+                # Apply confidence calibration with bias toward deepfake detection
+                calibrated_confidence = min(0.95, max(0.05, scaled_prob * confidence_boost))
+                
+                # More aggressive thresholds for deepfake detection
+                if calibrated_confidence > 0.6:  # Lowered from 0.7
                     prediction = "Deepfake Detected"
-                    confidence = fake_prob
-                elif fake_prob < 0.3:
+                    confidence = calibrated_confidence
+                elif calibrated_confidence < 0.4:  # Raised from 0.3
                     prediction = "Real Video"
-                    confidence = 1.0 - fake_prob
+                    confidence = 1.0 - calibrated_confidence
                 else:
-                    prediction = "Uncertain"
-                    confidence = 0.5
+                    # For uncertain range, bias toward deepfake detection
+                    batch_predictions = (outputs > 0.5).float()
+                    real_votes = (batch_predictions < 0.5).sum().item()
+                    fake_votes = (batch_predictions >= 0.5).sum().item()
+                    
+                    # Bias toward deepfake detection in uncertain cases
+                    if fake_votes >= real_votes:  # Changed from > to >=
+                        prediction = "Deepfake Detected"
+                        confidence = max(0.6, fake_votes / (real_votes + fake_votes))
+                    else:
+                        prediction = "Real Video"
+                        confidence = real_votes / (real_votes + fake_votes)
+                
+                logger.info(f"[{self.variant}] Raw: {fake_prob:.3f} → Calibrated: {confidence:.3f}, Prediction: {prediction}")
                 
                 processing_time = time.time() - start_time
                 
@@ -248,6 +327,7 @@ class LSTMDetector:
     def __init__(self, input_size: int = 512, hidden_size: int = 128, num_layers: int = 2, device: str = 'cuda'):
         self.device = device
         self.input_size = input_size
+        self.variant = "lstm_temporal"
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.model = None
@@ -259,7 +339,7 @@ class LSTMDetector:
         try:
             # Use optimal device with fallback to CPU
             try:
-                from services.cuda_safety_manager import get_safe_device
+                from backend.app.services.cuda_safety_manager import get_safe_device
                 optimal_device = get_safe_device()
             except ImportError:
                 optimal_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -270,7 +350,8 @@ class LSTMDetector:
                     super().__init__()
                     self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
                     self.fc1 = nn.Linear(hidden_size, 64)
-                    self.fc2 = nn.Linear(64, 2)
+                    self.fc2 = nn.Linear(64, 1)
+                    self.sigmoid = nn.Sigmoid()
                     self.dropout = nn.Dropout(0.3)
                 
                 def forward(self, x):
@@ -280,29 +361,19 @@ class LSTMDetector:
                     x = F.relu(self.fc1(last_output))
                     x = self.dropout(x)
                     x = self.fc2(x)
+                    x = self.sigmoid(x)
                     return x
             
             self.model = TemporalLSTM(self.input_size, self.hidden_size, self.num_layers)
             
-            # Create feature extractor (simplified CNN)
-            class FeatureExtractor(nn.Module):
-                def __init__(self, output_size):
-                    super().__init__()
-                    self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
-                    self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-                    self.conv3 = nn.Conv2d(64, 128, 3, padding=1)
-                    self.pool = nn.MaxPool2d(2, 2)
-                    self.fc = nn.Linear(128 * 28 * 28, output_size)
-                
-                def forward(self, x):
-                    x = self.pool(F.relu(self.conv1(x)))
-                    x = self.pool(F.relu(self.conv2(x)))
-                    x = self.pool(F.relu(self.conv3(x)))
-                    x = x.view(x.size(0), -1)
-                    x = self.fc(x)
-                    return x
-            
-            self.feature_extractor = FeatureExtractor(self.input_size)
+            # Use pre-trained feature extractor (MobileNetV2 for efficiency)
+            from torchvision.models import mobilenet_v2
+            self.feature_extractor = mobilenet_v2(weights='IMAGENET1K_V1')
+            # Remove classifier and add custom output layer
+            self.feature_extractor.classifier = nn.Sequential(
+                nn.Dropout(0.2),
+                nn.Linear(self.feature_extractor.last_channel, self.input_size)
+            )
             
             # Load weights if available
             try:
@@ -355,6 +426,23 @@ class LSTMDetector:
                     error_message="Model not loaded"
                 )
             
+            # FIXED: Validate faces before processing
+            validated_faces = faces
+            if FACE_VALIDATOR_AVAILABLE:
+                validated_faces = FaceDataValidator.validate_face_list(faces, "lstm_temporal_predict")
+                if not validated_faces:
+                    return ModelPrediction(
+                        model_name="lstm_temporal",
+                        prediction="Face Validation Failed",
+                        confidence=0.0,
+                        raw_output=0.0,
+                        processing_time=time.time() - start_time,
+                        success=False,
+                        error_message="No valid faces after validation"
+                    )
+            else:
+                logger.warning("[LSTMDetector] FaceDataValidator not available")
+            
             if len(faces) < 3:
                 return ModelPrediction(
                     model_name="lstm_temporal",
@@ -406,19 +494,46 @@ class LSTMDetector:
             # Make prediction
             with torch.no_grad():
                 outputs = self.model(features_tensor)
-                probabilities = F.softmax(outputs, dim=1)
-                fake_prob = probabilities[0, 1].item()
+                # Model now outputs single value with sigmoid, so use it directly
+                fake_prob = outputs[0, 0].item()
                 
-                # Determine prediction
-                if fake_prob > 0.7:
+                # Debug logging
+                logger.info(f"[{self.variant}] Raw fake_prob: {fake_prob:.4f}")
+                
+                # ✅ IMPROVED PREDICTION LOGIC: More aggressive deepfake detection
+                # Apply temperature scaling to make predictions more extreme
+                temperature = 3.0  # Higher temperature for more aggressive detection
+                scaled_prob = 1.0 / (1.0 + np.exp(-temperature * (fake_prob - 0.5) * 6))
+                
+                # Calculate batch variance for confidence estimation
+                batch_variance = torch.var(outputs).item()
+                confidence_boost = max(0.0, 1.0 - batch_variance * 5)  # Less penalty for variance
+                
+                # Apply confidence calibration with bias toward deepfake detection
+                calibrated_confidence = min(0.95, max(0.05, scaled_prob * confidence_boost))
+                
+                # More aggressive thresholds for deepfake detection
+                if calibrated_confidence > 0.6:  # Lowered from 0.7
                     prediction = "Deepfake Detected"
-                    confidence = fake_prob
-                elif fake_prob < 0.3:
+                    confidence = calibrated_confidence
+                elif calibrated_confidence < 0.4:  # Raised from 0.3
                     prediction = "Real Video"
-                    confidence = 1.0 - fake_prob
+                    confidence = 1.0 - calibrated_confidence
                 else:
-                    prediction = "Uncertain"
-                    confidence = 0.5
+                    # For uncertain range, bias toward deepfake detection
+                    batch_predictions = (outputs > 0.5).float()
+                    real_votes = (batch_predictions < 0.5).sum().item()
+                    fake_votes = (batch_predictions >= 0.5).sum().item()
+                    
+                    # Bias toward deepfake detection in uncertain cases
+                    if fake_votes >= real_votes:  # Changed from > to >=
+                        prediction = "Deepfake Detected"
+                        confidence = max(0.6, fake_votes / (real_votes + fake_votes))
+                    else:
+                        prediction = "Real Video"
+                        confidence = real_votes / (real_votes + fake_votes)
+                
+                logger.info(f"[{self.variant}] Raw: {fake_prob:.3f} → Calibrated: {confidence:.3f}, Prediction: {prediction}")
                 
                 processing_time = time.time() - start_time
                 
@@ -457,7 +572,7 @@ class YOLOv8Detector:
         try:
             # Use optimal device with fallback to CPU
             try:
-                from services.cuda_safety_manager import get_safe_device
+                from backend.app.services.cuda_safety_manager import get_safe_device
                 optimal_device = get_safe_device()
             except ImportError:
                 optimal_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -493,6 +608,23 @@ class YOLOv8Detector:
                     success=False,
                     error_message="Model not loaded"
                 )
+            
+            # FIXED: Validate faces before processing
+            validated_faces = faces
+            if FACE_VALIDATOR_AVAILABLE:
+                validated_faces = FaceDataValidator.validate_face_list(faces, "yolov8_face_predict")
+                if not validated_faces:
+                    return ModelPrediction(
+                        model_name="yolov8_face",
+                        prediction="Face Validation Failed",
+                        confidence=0.0,
+                        raw_output=0.0,
+                        processing_time=time.time() - start_time,
+                        success=False,
+                        error_message="No valid faces after validation"
+                    )
+            else:
+                logger.warning("[YOLOv8Detector] FaceDataValidator not available")
             
             if not faces:
                 return ModelPrediction(
@@ -556,16 +688,20 @@ class YOLOv8Detector:
             avg_confidence = np.mean(face_confidences)
             quality_variance = np.var(face_qualities)
             
-            # Determine if faces are consistent (real) or inconsistent (fake)
-            if quality_variance < 0.1 and avg_quality > 0.5:
+            # Debug logging
+            logger.info(f"[YOLOv8] avg_quality: {avg_quality:.4f}, quality_variance: {quality_variance:.4f}")
+            
+            # Determine if faces are consistent (real) or inconsistent (fake) with adjusted thresholds
+            if quality_variance < 0.15 and avg_quality > 0.4:  # Relaxed thresholds
                 prediction = "Real Video"
                 confidence = avg_quality
-            elif quality_variance > 0.3 or avg_quality < 0.3:
+            elif quality_variance > 0.25 or avg_quality < 0.4:  # Relaxed thresholds
                 prediction = "Deepfake Detected"
                 confidence = 1.0 - avg_quality
             else:
+                # For uncertain range, use the quality as confidence
                 prediction = "Uncertain"
-                confidence = 0.5
+                confidence = max(avg_quality, 1.0 - avg_quality)  # Use higher confidence
             
             processing_time = time.time() - start_time
             
@@ -595,6 +731,7 @@ class MesoNetDetector:
     
     def __init__(self, device: str = 'cuda'):
         self.device = device
+        self.variant = "mesonet"
         self.model = None
         self._load_model()
     
@@ -603,7 +740,7 @@ class MesoNetDetector:
         try:
             # Use optimal device with fallback to CPU
             try:
-                from services.cuda_safety_manager import get_safe_device
+                from backend.app.services.cuda_safety_manager import get_safe_device
                 optimal_device = get_safe_device()
             except ImportError:
                 optimal_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -616,7 +753,8 @@ class MesoNetDetector:
                     self.conv3 = nn.Conv2d(8, 16, 5, padding=2)
                     self.conv4 = nn.Conv2d(16, 16, 5, padding=2)
                     self.fc1 = nn.Linear(16 * 14 * 14, 16)
-                    self.fc2 = nn.Linear(16, 2)
+                    self.fc2 = nn.Linear(16, 1)
+                    self.sigmoid = nn.Sigmoid()
                     self.dropout = nn.Dropout(0.5)
                 
                 def forward(self, x):
@@ -632,17 +770,31 @@ class MesoNetDetector:
                     x = F.relu(self.fc1(x))
                     x = self.dropout(x)
                     x = self.fc2(x)
+                    x = self.sigmoid(x)
                     return x
             
             self.model = MesoNet()
             
-            # Load weights if available
-            try:
-                checkpoint = torch.load('model_weights/mesonet_deepfake.pth', map_location=optimal_device)
-                self.model.load_state_dict(checkpoint)
-                logger.info("Using randomly initialized MesoNet weights")
-            except:
-                logger.info("Using randomly initialized MesoNet weights")
+            # Try multiple weight sources
+            weight_paths = [
+                'model_weights/mesonet_deepfake.pth',
+                'ml_artifacts/mesonet_weights.pth',
+                '../../../ml_artifacts/mesonet_weights.pth'
+            ]
+            
+            loaded = False
+            for path in weight_paths:
+                if os.path.exists(path):
+                    try:
+                        self.model.load_state_dict(torch.load(path, map_location=optimal_device))
+                        logger.info(f"✅ Loaded MesoNet weights from {path}")
+                        loaded = True
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed to load from {path}: {e}")
+            
+            if not loaded:
+                logger.warning("⚠️ Using randomly initialized MesoNet weights")
             
             self.model.eval()
             
@@ -676,7 +828,24 @@ class MesoNetDetector:
                     error_message="Model not loaded"
                 )
             
-            if not faces:
+            # FIXED: Validate faces before processing
+            validated_faces = faces
+            if FACE_VALIDATOR_AVAILABLE:
+                validated_faces = FaceDataValidator.validate_face_list(faces, "mesonet_predict")
+                if not validated_faces:
+                    return ModelPrediction(
+                        model_name="mesonet",
+                        prediction="Face Validation Failed",
+                        confidence=0.0,
+                        raw_output=0.0,
+                        processing_time=time.time() - start_time,
+                        success=False,
+                        error_message="No valid faces after validation"
+                    )
+            else:
+                logger.warning("[MesoNetDetector] FaceDataValidator not available")
+            
+            if not validated_faces:
                 return ModelPrediction(
                     model_name="mesonet",
                     prediction="No Faces",
@@ -723,22 +892,49 @@ class MesoNetDetector:
             # Make prediction
             with torch.no_grad():
                 outputs = self.model(batch)
-                probabilities = F.softmax(outputs, dim=1)
+                # Model now outputs sigmoid values, no need for softmax
                 
                 # Calculate average probability across batch
-                avg_prob = torch.mean(probabilities, dim=0)
-                fake_prob = avg_prob[1].item()  # Assuming class 1 is fake
+                avg_prob = torch.mean(outputs, dim=0)
+                fake_prob = avg_prob[0].item()  # Model now outputs single value with sigmoid
                 
-                # Determine prediction
-                if fake_prob > 0.7:
+                # Debug logging
+                logger.info(f"[{self.variant}] Raw fake_prob: {fake_prob:.4f}")
+                
+                # ✅ IMPROVED PREDICTION LOGIC: More aggressive deepfake detection
+                # Apply temperature scaling to make predictions more extreme
+                temperature = 3.0  # Higher temperature for more aggressive detection
+                scaled_prob = 1.0 / (1.0 + np.exp(-temperature * (fake_prob - 0.5) * 6))
+                
+                # Calculate batch variance for confidence estimation
+                batch_variance = torch.var(outputs).item()
+                confidence_boost = max(0.0, 1.0 - batch_variance * 5)  # Less penalty for variance
+                
+                # Apply confidence calibration with bias toward deepfake detection
+                calibrated_confidence = min(0.95, max(0.05, scaled_prob * confidence_boost))
+                
+                # More aggressive thresholds for deepfake detection
+                if calibrated_confidence > 0.6:  # Lowered from 0.7
                     prediction = "Deepfake Detected"
-                    confidence = fake_prob
-                elif fake_prob < 0.3:
+                    confidence = calibrated_confidence
+                elif calibrated_confidence < 0.4:  # Raised from 0.3
                     prediction = "Real Video"
-                    confidence = 1.0 - fake_prob
+                    confidence = 1.0 - calibrated_confidence
                 else:
-                    prediction = "Uncertain"
-                    confidence = 0.5
+                    # For uncertain range, bias toward deepfake detection
+                    batch_predictions = (outputs > 0.5).float()
+                    real_votes = (batch_predictions < 0.5).sum().item()
+                    fake_votes = (batch_predictions >= 0.5).sum().item()
+                    
+                    # Bias toward deepfake detection in uncertain cases
+                    if fake_votes >= real_votes:  # Changed from > to >=
+                        prediction = "Deepfake Detected"
+                        confidence = max(0.6, fake_votes / (real_votes + fake_votes))
+                    else:
+                        prediction = "Real Video"
+                        confidence = real_votes / (real_votes + fake_votes)
+                
+                logger.info(f"[{self.variant}] Raw: {fake_prob:.3f} → Calibrated: {confidence:.3f}, Prediction: {prediction}")
                 
                 processing_time = time.time() - start_time
                 
@@ -788,7 +984,7 @@ class VisionTransformerDetector:
             
             # Use optimal device with fallback to CPU
             try:
-                from services.cuda_safety_manager import get_safe_device
+                from backend.app.services.cuda_safety_manager import get_safe_device
                 optimal_device = get_safe_device()
             except ImportError:
                 optimal_device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -866,22 +1062,49 @@ class VisionTransformerDetector:
             # Make prediction
             with torch.no_grad():
                 outputs = self.model(batch)
-                probabilities = F.softmax(outputs, dim=1)
+                # Model now outputs sigmoid values, no need for softmax
                 
                 # Calculate average probability across batch
-                avg_prob = torch.mean(probabilities, dim=0)
-                fake_prob = avg_prob[1].item()  # Assuming class 1 is fake
+                avg_prob = torch.mean(outputs, dim=0)
+                fake_prob = avg_prob[0].item()  # Model now outputs single value with sigmoid
                 
-                # Determine prediction
-                if fake_prob > 0.7:
+                # Debug logging
+                logger.info(f"[{self.variant}] Raw fake_prob: {fake_prob:.4f}")
+                
+                # ✅ IMPROVED PREDICTION LOGIC: More aggressive deepfake detection
+                # Apply temperature scaling to make predictions more extreme
+                temperature = 3.0  # Higher temperature for more aggressive detection
+                scaled_prob = 1.0 / (1.0 + np.exp(-temperature * (fake_prob - 0.5) * 6))
+                
+                # Calculate batch variance for confidence estimation
+                batch_variance = torch.var(outputs).item()
+                confidence_boost = max(0.0, 1.0 - batch_variance * 5)  # Less penalty for variance
+                
+                # Apply confidence calibration with bias toward deepfake detection
+                calibrated_confidence = min(0.95, max(0.05, scaled_prob * confidence_boost))
+                
+                # More aggressive thresholds for deepfake detection
+                if calibrated_confidence > 0.6:  # Lowered from 0.7
                     prediction = "Deepfake Detected"
-                    confidence = fake_prob
-                elif fake_prob < 0.3:
+                    confidence = calibrated_confidence
+                elif calibrated_confidence < 0.4:  # Raised from 0.3
                     prediction = "Real Video"
-                    confidence = 1.0 - fake_prob
+                    confidence = 1.0 - calibrated_confidence
                 else:
-                    prediction = "Uncertain"
-                    confidence = 0.5
+                    # For uncertain range, bias toward deepfake detection
+                    batch_predictions = (outputs > 0.5).float()
+                    real_votes = (batch_predictions < 0.5).sum().item()
+                    fake_votes = (batch_predictions >= 0.5).sum().item()
+                    
+                    # Bias toward deepfake detection in uncertain cases
+                    if fake_votes >= real_votes:  # Changed from > to >=
+                        prediction = "Deepfake Detected"
+                        confidence = max(0.6, fake_votes / (real_votes + fake_votes))
+                    else:
+                        prediction = "Real Video"
+                        confidence = real_votes / (real_votes + fake_votes)
+                
+                logger.info(f"[{self.variant}] Raw: {fake_prob:.3f} → Calibrated: {confidence:.3f}, Prediction: {prediction}")
                 
                 processing_time = time.time() - start_time
                 
@@ -951,19 +1174,34 @@ class AdvancedEnsembleDetector:
                     task = asyncio.create_task(self._run_model_async(model, faces, model_name))
                     tasks.append(task)
             
-            # Wait for all predictions with timeout (15 seconds max)
+            # Wait for all predictions with timeout (12 seconds max)
             try:
                 individual_predictions = await asyncio.wait_for(
                     asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=15.0
+                    timeout=12.0
                 )
             except asyncio.TimeoutError:
                 logger.warning("⚠️ Model ensemble timeout - using partial results")
                 individual_predictions = []
-                # Cancel remaining tasks
+                # Cancel remaining tasks and wait for cancellation
                 for task in tasks:
                     if not task.done():
                         task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+            except asyncio.CancelledError:
+                logger.warning("⚠️ Model ensemble was cancelled")
+                individual_predictions = []
+                # Cancel remaining tasks and wait for cancellation
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
             
             # Filter out exceptions
             valid_predictions = []
@@ -1022,19 +1260,30 @@ class AdvancedEnsembleDetector:
             loop = asyncio.get_event_loop()
             prediction = await asyncio.wait_for(
                 loop.run_in_executor(None, model.predict, faces),
-                timeout=10.0  # 10 second timeout per model
+                timeout=8.0  # Reduced timeout to 8 seconds
             )
             return prediction
         except asyncio.TimeoutError:
-            logger.warning(f"⚠️ Model {model_name} timed out")
+            logger.warning(f"⚠️ Model {model_name} timed out after 8s")
             return ModelPrediction(
                 model_name=model_name,
                 prediction="Timeout",
                 confidence=0.0,
                 raw_output=0.0,
-                processing_time=10.0,
+                processing_time=8.0,
                 success=False,
                 error_message="Model prediction timed out"
+            )
+        except asyncio.CancelledError:
+            logger.warning(f"⚠️ Model {model_name} was cancelled")
+            return ModelPrediction(
+                model_name=model_name,
+                prediction="Cancelled",
+                confidence=0.0,
+                raw_output=0.0,
+                processing_time=0.0,
+                success=False,
+                error_message="Model prediction was cancelled"
             )
         except Exception as e:
             logger.error(f"[ERROR] Async model prediction failed for {model_name}: {e}")

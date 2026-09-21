@@ -29,6 +29,9 @@ class TensorConversionFixer:
     
     def __init__(self, device: str = "auto"):
         # Enhanced device selection with comprehensive CUDA safety
+        if device == "auto":
+            # Try GPU first, fallback to CPU if needed
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = self._get_safe_device(device)
         self.conversion_errors = 0
         self.successful_conversions = 0
@@ -53,13 +56,14 @@ class TensorConversionFixer:
                         return "cpu"
                     raise
                 
-                # Test CUDA with safe operations - create on CPU first
+                # Use centralized CUDA safety manager to avoid driver conflicts
                 try:
-                    test_tensor = torch.tensor([1.0])  # Create on CPU first
-                    test_tensor = test_tensor.to("cuda")  # Move to CUDA safely
-                    _ = test_tensor * 2
-                    del test_tensor
-                    torch.cuda.empty_cache()
+                    from backend.app.services.cuda_safety_manager import get_validated_device, is_cuda_available_global
+                    
+                    if is_cuda_available_global():
+                        device = get_validated_device()
+                    else:
+                        device = "cpu"
                     logger.info("✅ CUDA device test passed for tensor conversion")
                     return "cuda"
                 except Exception as cuda_test_error:
