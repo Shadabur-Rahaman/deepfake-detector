@@ -19,7 +19,7 @@ import secrets
 import hashlib
 import os
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 
 import jwt
@@ -33,6 +33,11 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
     redis = None
+
+if TYPE_CHECKING and REDIS_AVAILABLE:
+    RedisClient = redis.Redis
+else:
+    RedisClient = Any
 
 from .models import User, UserSession, AuditLog, PasswordReset, Role
 from .exceptions import AuthenticationError, AuthorizationError
@@ -52,7 +57,7 @@ class AuthResult:
 class AuthCore:
     """Core authentication system with enterprise-grade security"""
     
-    def __init__(self, db_session: Session, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, db_session: Session, redis_client: Optional[RedisClient] = None):
         self.db_session = db_session
         self.redis_client = redis_client
         
