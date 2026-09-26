@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import {
   Play, Brain, Network, Layers
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { API_CONFIG } from '@/config/api';
 
 const ApiDocs: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState('javascript');
@@ -24,6 +25,20 @@ const ApiDocs: React.FC = () => {
   const [progress, setProgress] = useState(0); // ✅ Fixed: Added missing progress state
   const { toast } = useToast();
   const { navigationState, setLastApiDocsSection } = useNavigation();
+
+  const apiBase = useMemo(() => {
+    if (API_CONFIG.BASE_URL) return API_CONFIG.BASE_URL;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return 'http://127.0.0.1:8000';
+  }, []);
+
+  const wsBase = useMemo(() => {
+    if (API_CONFIG.WS_URL) return API_CONFIG.WS_URL;
+    if (typeof window !== 'undefined') {
+      return (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
+    }
+    return 'ws://127.0.0.1:8000';
+  }, []);
 
   const languages = [
     { id: 'javascript', name: 'JavaScript', icon: '🟨' },
@@ -35,7 +50,7 @@ const ApiDocs: React.FC = () => {
   const endpoints = [
     {
       method: 'POST',
-      endpoint: '/detect-modern-ai-content',
+      endpoint: '/v1/detect',
       description: 'Submit media files for advanced MesoNet CNN deepfake analysis. Supports multiple formats with high-accuracy detection.',
       parameters: [
         { name: 'file', type: 'multipart/form-data', description: 'Media file (MP4, MOV, AVI, JPG, PNG) - max 100MB', required: true },
@@ -46,7 +61,7 @@ const ApiDocs: React.FC = () => {
     },
     {
       method: 'POST', 
-      endpoint: '/detect-deepfake-youtube',
+      endpoint: '/v1/detect/youtube',
       description: 'Analyze YouTube videos directly by URL using our MesoNet CNN pipeline with automatic video processing.',
       parameters: [
         { name: 'url', type: 'string', description: 'Valid YouTube video URL for analysis', required: true },
@@ -57,7 +72,7 @@ const ApiDocs: React.FC = () => {
     },
     {
       method: 'GET',
-      endpoint: '/detection-status/{job_id}', 
+      endpoint: '/v1/jobs/{job_id}', 
       description: 'Monitor real-time processing status and progress of your MesoNet CNN analysis job with detailed metrics.',
       parameters: [
         { name: 'job_id', type: 'string', description: 'Unique job identifier returned from analysis endpoints', required: true }
@@ -80,9 +95,17 @@ const ApiDocs: React.FC = () => {
 
   const codeExamples = {
     javascript: `// iFake MesoNet CNN API Client
+//   - Works same-origin inside the iFake website by default
+//   - For standalone usage pass: new iFakeAPIClient('https://api.ifake.ai')
 class iFakeAPIClient {
-  constructor(baseURL = 'http://127.0.0.1:8000') {
-    this.baseURL = baseURL;
+  constructor(baseURL) {
+    if (baseURL) {
+      this.baseURL = baseURL.replace(/\\/$/, '');
+    } else if (typeof window !== 'undefined') {
+      this.baseURL = window.location.origin;
+    } else {
+      this.baseURL = 'http://127.0.0.1:8000';
+    }
   }
 
   // File Upload Analysis with Enhanced Mode
@@ -90,17 +113,17 @@ class iFakeAPIClient {
     const formData = new FormData();
     formData.append('file', file);
     if (enhanced) formData.append('enhanced', 'true');
-    
+
     try {
       const response = await fetch(\`\${this.baseURL}/detect-modern-ai-content\`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (!response.ok) {
         throw new Error(\`HTTP error! status: \${response.status}\`);
       }
-      
+
       const { job_id } = await response.json();
       console.log('Analysis started:', job_id);
       return job_id;
@@ -118,7 +141,7 @@ class iFakeAPIClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, quality })
       });
-      
+
       const { job_id } = await response.json();
       return job_id;
     } catch (error) {
@@ -137,13 +160,13 @@ class iFakeAPIClient {
   async waitForResults(jobId, maxAttempts = 30) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const status = await this.checkStatus(jobId);
-      
+
       if (status.status === 'completed') {
         return status;
       } else if (status.status === 'failed') {
         throw new Error(status.error || 'Analysis failed');
       }
-      
+
       // Wait before next check
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
@@ -152,15 +175,17 @@ class iFakeAPIClient {
 
   // Real-time WebSocket Detection
   connectRealTime(onResult, onError) {
-    const ws = new WebSocket(\`ws://\${this.baseURL.replace('http', 'ws')}/ws/real-time-detection\`);
-    
+    let base = this.baseURL.replace(/^http/, 'ws');
+    if (base.startsWith('/')) base = (typeof window !== 'undefined') ? \`\${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//\${window.location.host}\` : 'ws://127.0.0.1:8000';
+    const ws = new WebSocket(\`\${base}/ws/real-time-detection\`);
+
     ws.onopen = () => console.log('Real-time detection connected');
     ws.onmessage = (event) => {
       const result = JSON.parse(event.data);
       onResult(result);
     };
     ws.onerror = (error) => onError(error);
-    
+
     return ws;
   }
 }
@@ -192,16 +217,23 @@ import websockets
 import json
 import base64
 import time
+import os
 from typing import Optional, Dict, Any
 
 class iFakeAPIClient:
     """
     Official Python client for iFake MesoNet CNN API
-    Provides comprehensive deepfake detection capabilities
+    Provides comprehensive deepfake detection capabilities.
+    Set IFAKE_API_URL env var to override the default.
     """
     
-    def __init__(self, base_url: str = "http://127.0.0.1:8000"):
-        self.base_url = base_url
+    def __init__(self, base_url: Optional[str] = None):
+        # Same-as-browser default: pick up env var first, else localhost
+        self.base_url = (
+            base_url
+            or os.environ.get("IFAKE_API_URL")
+            or "http://127.0.0.1:8000"
+        ).rstrip("/")
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'iFake-Python-Client/1.0'
@@ -302,7 +334,18 @@ class iFakeAPIClient:
             frame_data: Raw image/frame data
             threshold: Detection confidence threshold
         """
-        uri = f"ws://{self.base_url.replace('http://', '')}/ws/real-time-detection"
+        # Handle http(s) -> ws(s) conversion regardless of trailing slash
+        http_base = self.base_url.rstrip("/")
+        if http_base.startswith("https://"):
+            ws_proto = "wss://"
+            host = http_base[len("https://"):]
+        elif http_base.startswith("http://"):
+            ws_proto = "ws://"
+            host = http_base[len("http://"):]
+        else:
+            ws_proto = "ws://"
+            host = http_base
+        uri = f"{ws_proto}{host}/ws/real-time-detection"
         
         try:
             async with websockets.connect(uri) as websocket:
@@ -321,7 +364,7 @@ class iFakeAPIClient:
 
 # Usage Examples
 def main():
-    # Initialize client
+    # Initialize client — picks up IFAKE_API_URL from env automatically
     client = iFakeAPIClient()
     
     # Example 1: Analyze video file
@@ -349,9 +392,12 @@ if __name__ == "__main__":
     curl: `#!/bin/bash
 
 # iFake MesoNet CNN API - cURL Examples
-BASE_URL="http://127.0.0.1:8000"
+# Set IFAKE_API_URL env var to point to your deployment:
+#   export IFAKE_API_URL="https://ifake.ai"
+BASE_URL="\${IFAKE_API_URL:-http://127.0.0.1:8000}"
 
 echo "=== iFake API Testing with cURL ==="
+echo "Using API endpoint: $BASE_URL"
 
 # Function to check if jq is installed
 check_jq() {
@@ -448,15 +494,22 @@ echo "\\n=== Testing Complete ==="`,
     php: `<?php
 /**
  * iFake MesoNet CNN API - PHP Client
- * Official PHP SDK for deepfake detection
+ * Official PHP SDK for deepfake detection.
+ * Use IFAKE_API_URL env var or pass baseUrl to constructor.
  */
 
 class iFakeAPIClient {
     private $baseUrl;
     private $httpClient;
     
-    public function __construct($baseUrl = 'http://127.0.0.1:8000') {
-        $this->baseUrl = rtrim($baseUrl, '/');
+    public function __construct($baseUrl = null) {
+        if ($baseUrl !== null) {
+            $this->baseUrl = rtrim($baseUrl, '/');
+        } elseif (getenv('IFAKE_API_URL')) {
+            $this->baseUrl = rtrim(getenv('IFAKE_API_URL'), '/');
+        } else {
+            $this->baseUrl = 'http://127.0.0.1:8000';
+        }
     }
     
     /**
@@ -871,7 +924,7 @@ try {
                 </LoadingButton>
               </Link>
               <Button variant="outline" className="neural-card neural-button" asChild>
-                <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener noreferrer">
+                <a href="/docs" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Interactive Docs
                 </a>
@@ -980,10 +1033,10 @@ try {
                   </p>
                   <div className="space-y-2">
                     <div className="neural-card p-3 rounded-lg">
-                      <code className="text-sm neural-text">http://127.0.0.1:8000/docs</code>
+                      <code className="text-sm neural-text">{apiBase}/docs</code>
                     </div>
                     <div className="neural-card p-3 rounded-lg">
-                      <code className="text-sm neural-text">http://127.0.0.1:8000/redoc</code>
+                      <code className="text-sm neural-text">{apiBase}/redoc</code>
                     </div>
                   </div>
                   <p className="text-muted-foreground mt-4 text-sm neural-text">
@@ -1370,7 +1423,7 @@ try {
                 </Link>
               </Button>
               <Button variant="outline" size="lg" className="neural-card neural-button" asChild>
-                <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener noreferrer">
+                <a href="/docs" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Interactive API Docs
                 </a>

@@ -1,14 +1,18 @@
-const DEFAULT_API = "http://127.0.0.1:8000";
+const DEFAULT_API = "";
 
 const apiFromEnv = import.meta.env.VITE_API_URL as string | undefined;
 const wsFromEnv = import.meta.env.VITE_WS_URL as string | undefined;
 
+function _defaultWsBase(): string {
+  if (typeof window === "undefined") return "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}`;
+}
+
 export const API_CONFIG = {
-  BASE_URL: apiFromEnv || DEFAULT_API,
-  WS_URL: wsFromEnv || (apiFromEnv
-    ? apiFromEnv.replace(/^http/, "ws") + "/ws/admin"
-    : "ws://127.0.0.1:8000/ws/admin"),
-  HEALTH_ENDPOINT: "/health",
+  BASE_URL: apiFromEnv ?? DEFAULT_API,
+  WS_URL: wsFromEnv ?? _defaultWsBase(),
+  HEALTH_ENDPOINT: "/api/health",
 };
 
 export const getApiUrl = (): string => API_CONFIG.BASE_URL;

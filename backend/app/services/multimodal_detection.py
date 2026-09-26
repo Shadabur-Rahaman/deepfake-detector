@@ -293,18 +293,13 @@ class AudioDeepfakeDetector:
     async def _run_audio_model(self, model: Dict, features: AudioFeatures, model_name: str) -> Dict[str, Any]:
         """Run audio detection model"""
         try:
-            # Simulate model inference
-            await asyncio.sleep(0.1)
-            
-            # Mock detection result
-            confidence = np.random.uniform(0.6, 0.95)
-            prediction = 'deepfake' if confidence > 0.8 else 'real'
-            
             return {
-                'prediction': prediction,
-                'confidence': confidence,
-                'model': model_name,
-                'artifacts': ['voice_cloning', 'synthetic_emotion'] if prediction == 'deepfake' else []
+                "prediction": "unknown",
+                "confidence": 0.0,
+                "model": model_name,
+                "artifacts": [],
+                "skipped": True,
+                "reason": "No trained audio weights are shipped; refusing random scores",
             }
             
         except Exception as e:

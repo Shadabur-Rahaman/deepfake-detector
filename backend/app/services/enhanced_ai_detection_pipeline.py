@@ -98,6 +98,10 @@ class EnhancedAIDetectionPipeline:
         logger.info(f"Enhanced AI Detection Pipeline initialized")
         logger.info(f"API Status - OpenAI: {self.api_enabled['openai']}, Claude: {self.api_enabled['claude']}, Gemini: {self.api_enabled['gemini']}")
     
+    async def initialize(self) -> bool:
+        """No-op initializer so hybrid Gemini calls do not crash."""
+        return True
+    
     async def detect_deepfake_multi_stage(self, video_path: str, faces: List[np.ndarray], video_id: str = None) -> PipelineResult:
         """
         Multi-stage deepfake detection with AI API integration

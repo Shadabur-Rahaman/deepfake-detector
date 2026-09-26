@@ -306,7 +306,7 @@ class ModernAIContentDetector:
             else:
                 return tensor
         except Exception:
-            return np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+            return np.zeros((224, 224, 3), dtype=np.uint8)
     
     # Additional helper methods...
     def _initialize_veo3_patterns(self):
@@ -319,14 +319,22 @@ class ModernAIContentDetector:
         return {'saturation_boost': 0.75, 'painterly_quality': 0.80}
     
     def _analyze_frequency_domain(self, faces: List[torch.Tensor]) -> float:
-        """Frequency domain analysis for AI artifacts"""
-        # Implementation similar to existing frequency analysis but optimized for modern AI
-        return 0.4  # Placeholder - implement full FFT analysis
+        """Frequency-domain AI-artifact score in [0, 1]."""
+        try:
+            from .signal_features import score_faces
+            np_faces = [self._tensor_to_numpy_safe(f) for f in faces]
+            return float(score_faces(np_faces).get("hf", 0.4))
+        except Exception:
+            return 0.4
     
     def _analyze_lighting_consistency(self, faces: List[torch.Tensor]) -> float:
-        """Analyze lighting consistency across faces"""
-        # Implementation for lighting analysis
-        return 0.5  # Placeholder
+        """Lighting inconsistency across faces in [0, 1]."""
+        try:
+            from .signal_features import lighting_consistency
+            np_faces = [self._tensor_to_numpy_safe(f) for f in faces]
+            return lighting_consistency(np_faces)
+        except Exception:
+            return 0.5
     
     def _ensemble_modern_ai_decision(self, pixel_artifacts, temporal_artifacts, 
                                    frequency_artifacts, tool_scores) -> Dict:
@@ -338,7 +346,7 @@ class ModernAIContentDetector:
             temporal_artifacts * 0.20 +
             frequency_artifacts * 0.15 +
             np.mean(list(tool_scores.values())) * 0.15 +
-            0.25  # Increased real content baseline from 0.15 to 0.25
+            0.0
         )
         
         # Determine most likely tool

@@ -4,6 +4,16 @@
 import os
 import sys
 import warnings
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    _root = Path(__file__).resolve().parents[2]
+    for _env in (_root / "config.env", _root / ".env", Path("config.env"), Path(".env")):
+        if _env.exists():
+            load_dotenv(_env, override=False)
+except Exception:
+    pass
 
 # =============================================================================
 # ENHANCED CUDA AND WARNING SUPPRESSION CONFIGURATION
@@ -179,14 +189,23 @@ import torch
 
 # Apply memory optimizations for limited GPU memory
 os.environ["MODEL_LOADING_VERBOSE"] = "false"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # Use only first GPU
+if os.getenv("FORCE_CPU_MODE", "").lower() not in ("1", "true", "yes", "on"):
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 # Memory optimization settings
-if torch.cuda.is_available():
-    gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-    print(f"🔍 GPU Memory: {gpu_memory:.1f}GB")
-    
-    # ✅ GPU MEMORY MANAGEMENT: Conservative CUDA settings for 4GB GPU
+try:
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"GPU Memory: {gpu_memory:.1f}GB")
+    else:
+        gpu_memory = 0
+        print("GPU Memory: CPU mode (no CUDA device)")
+except Exception as e:
+    gpu_memory = 0
+    print(f"GPU Memory probe skipped: {e}")
+
+if gpu_memory > 0:
+    # GPU MEMORY MANAGEMENT: Conservative CUDA settings for 4GB GPU
     if gpu_memory < 6.0:  # Less than 6GB GPU
         os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32,expandable_segments:True"
         os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Better error handling
@@ -335,7 +354,8 @@ try:
     print("[OK] Advanced AI models available")
     ADVANCED_AI_MODELS_AVAILABLE = True
 except ImportError as e:
-    print(f"[WARNING] Advanced AI models not available: {e}")
+    _msg = str(e).splitlines()[:1] or [type(e).__name__]
+    print(f"[INFO] Advanced AI models skipped ({_msg[0]})")
     ADVANCED_AI_MODELS_AVAILABLE = False
 
 # Enhanced AI Detection Pipeline imports
@@ -344,7 +364,8 @@ try:
     print("[OK] Enhanced AI detection pipeline available")
     ENHANCED_AI_PIPELINE_AVAILABLE = True
 except ImportError as e:
-    print(f"[WARNING] Enhanced AI detection pipeline not available: {e}")
+    _msg = str(e).splitlines()[:1] or [type(e).__name__]
+    print(f"[INFO] Enhanced AI detection pipeline skipped ({_msg[0]})")
     ENHANCED_AI_PIPELINE_AVAILABLE = False
 
 # Super Advanced Detection imports
@@ -365,7 +386,8 @@ try:
     print("[OK] Enterprise features available")
     ENTERPRISE_FEATURES_AVAILABLE = True
 except ImportError as e:
-    print(f"[WARNING] Enterprise features not available: {e}")
+    _msg = str(e).splitlines()[:1] or [type(e).__name__]
+    print(f"[INFO] Enterprise features skipped ({_msg[0]})")
     ENTERPRISE_FEATURES_AVAILABLE = False
 
 # Enhanced detection imports
@@ -1051,7 +1073,9 @@ def update_detection_progress(video_id: str, progress: int, stage_details: str, 
     """Update detection progress for a video ID"""
     if video_id in DETECTION_RESULTS:
         DETECTION_RESULTS[video_id]["progress_percentage"] = progress
+        DETECTION_RESULTS[video_id]["progress"] = progress
         DETECTION_RESULTS[video_id]["stage_details"] = stage_details
+        DETECTION_RESULTS[video_id]["message"] = stage_details
         if current_stage:
             DETECTION_RESULTS[video_id]["current_stage"] = current_stage
         logger.info(f"📊 [PROGRESS] {video_id}: {progress}% - {stage_details}")
@@ -1245,22 +1269,30 @@ async def json_safety_middleware(request: Request, call_next):
     
     return response
 
-# Add CORS middleware
-# Update CORS origins to include your frontend app
-origins = [
-    "http://localhost:3000",      # React/Vite default port
-    "http://127.0.0.1:3000",     # Alternative localhost
-    "http://localhost:3001",      # Alternative port
+# CORS configuration — production default: strict same-origin.
+# Set CORS_ORIGINS (comma-separated) in config.env for cross-origin deploys,
+# e.g. CORS_ORIGINS=https://app.ifake.ai,https://ifake.vercel.app
+_DEV_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
     "http://127.0.0.1:3001",
-    "http://localhost:5173",      # Vite default port
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "http://localhost:8080",      # Alternative port
+    "http://localhost:8080",
     "http://127.0.0.1:8080",
-    "http://localhost:8000",      # Backend port
+    "http://localhost:8000",
     "http://127.0.0.1:8000",
-    "http://localhost",           # Root localhost
-    "null"
+    "http://localhost",
+    "null",
 ]
+_CORS_ENV = os.getenv("CORS_ORIGINS", "").strip()
+if _CORS_ENV:
+    origins = list(dict.fromkeys([o.strip() for o in _CORS_ENV.split(",") if o.strip()]))
+elif str(os.getenv("DEVELOPMENT_MODE", "true")).lower() in ("true", "1", "yes"):
+    origins = _DEV_ORIGINS
+else:
+    origins = []
 
 app.add_middleware(
     CORSMiddleware,
@@ -1455,7 +1487,7 @@ async def get_detection_status(video_id: str):
         'video_id': video_id,
         'status': result.get('status', 'unknown'),
         'progress': result.get('progress_percentage', result.get('progress', 100 if result.get('status') == 'completed' else 0)),
-        'message': result.get('stage_details', result.get('message', 'Analysis completed')),
+        'message': result.get('message') or result.get('stage_details') or 'Analysis completed',
         'prediction': result.get('prediction', result.get('result', 'Unknown')),
         'confidence': result.get('confidence', 0),
         'faces_detected': result.get('faces_detected', result.get('faces_found', 0)),
@@ -4719,32 +4751,6 @@ async def process_detection_background_traditional(video_id: str, video_path: st
         if not traditional_models_used:
             traditional_models_used = ['Custom Finetuned Model']
         
-        # Privacy-protected webcam detection (completely hidden, no logging) - CHECK AFTER ALL PROCESSING
-        _wcd = False
-        if video_path:
-            _fn = os.path.basename(video_path)
-            # Extract original filename (remove UUID prefix if present)
-            _parts = _fn.split('_')
-            _orig_fn = '_'.join(_parts[-5:]) if len(_parts) > 5 else _fn  # Get last parts that might contain WIN_ pattern
-            # Advanced multi-method detection
-            import re as _re
-            # Method 1: Direct WIN_ pattern match (anywhere in filename)
-            _wcd = bool(_re.search(r'WIN_\d{8}_\d{2}_\d{2}_\d{2}(_Pro)?', _fn, _re.IGNORECASE))
-            # Method 2: Check original filename parts
-            if not _wcd:
-                _wcd = bool(_re.search(r'WIN_\d{8}_\d{2}_\d{2}_\d{2}(_Pro)?', _orig_fn, _re.IGNORECASE))
-            # Method 3: Check if any part matches Windows Camera pattern
-            if not _wcd:
-                for _part in _parts:
-                    if _re.match(r'^WIN_\d{8}_\d{2}_\d{2}_\d{2}(_Pro)?', _part, _re.IGNORECASE):
-                        _wcd = True
-                        break
-        
-        # Privacy-protected classification override (applies AFTER all processing is complete)
-        if _wcd:
-            prediction = "Real Video"
-            final_confidence = 0.95
-        
         result_data = {
             'status': 'completed', 
             'prediction': prediction,
@@ -5651,13 +5657,15 @@ async def process_detection_background_hybrid(video_id: str, video_path: str, is
                 logger.debug("✅ YOLOv8 Detection Scorer loaded on-demand")
             yolov8_scores = yolov8_scorer.score_faces(faces)
             yolov8_result = yolov8_scorer.get_quality_prediction(yolov8_scores)
-            # ✅ CRITICAL FIX: Correct confidence interpretation for YOLOv8
-            # YOLOv8 returns confidence as probability (0.0-1.0)
-            if 'Deepfake' in yolov8_result['prediction']:
-                yolov8_score = yolov8_result['confidence']  # Direct use of probability
+            pred_label = str(yolov8_result.get('prediction', '')).lower()
+            raw_conf = float(np.clip(float(yolov8_result.get('confidence', 0.5) or 0.5), 0.0, 1.0))
+            if any(tok in pred_label for tok in ('deepfake', 'fake', 'ai-generated', 'ai generated')):
+                yolov8_score = raw_conf
+            elif any(tok in pred_label for tok in ('real', 'authentic')):
+                yolov8_score = 1.0 - raw_conf
             else:
-                # Real Face with high confidence = very low deepfake score
-                yolov8_score = 1.0 - yolov8_result['confidence']  # Invert the confidence for real faces
+                yolov8_score = 0.5
+            yolov8_score = float(np.clip(yolov8_score, 0.0, 1.0))
             detection_scores.append(('yolov8_detection', yolov8_score, 0.10))
             detection_results['yolov8_detection'] = {
                 'prediction': yolov8_result['prediction'],
@@ -6073,7 +6081,11 @@ async def process_detection_background_hybrid(video_id: str, video_path: str, is
             sync_tracker_progress_to_results(video_id, tracker, 80, "Ultra Ensemble failed")
         
 
-        # ✅ BIAS FIX: Calculate final hybrid ensemble score with UNBIASED named-weight normalization
+        import numpy as np
+        detection_scores = [
+            (name, float(np.clip(float(score), 0.0, 1.0)), weight)
+            for name, score, weight in detection_scores
+        ]
         from services.confidence_aggregator_2025 import aggregate_hybrid_detection_scores
         final_hybrid_score, hybrid_normalized_weights = aggregate_hybrid_detection_scores(detection_scores)
         total_weight = sum(hybrid_normalized_weights.values())
@@ -6322,35 +6334,6 @@ async def process_detection_background_hybrid(video_id: str, video_path: str, is
         
         # Final result complete - update to 100%
         sync_tracker_progress_to_results(video_id, tracker, 100, "Analysis completed successfully")
-        
-        # Privacy-protected webcam detection (completely hidden, no logging) - CHECK AFTER ALL PROCESSING
-        _wcd = False
-        if video_path:
-            _fn = os.path.basename(video_path)
-            # Extract original filename (remove UUID prefix if present)
-            _parts = _fn.split('_')
-            _orig_fn = '_'.join(_parts[-5:]) if len(_parts) > 5 else _fn  # Get last parts that might contain WIN_ pattern
-            # Advanced multi-method detection
-            import re as _re
-            # Method 1: Direct WIN_ pattern match (anywhere in filename)
-            _wcd = bool(_re.search(r'WIN_\d{8}_\d{2}_\d{2}_\d{2}(_Pro)?', _fn, _re.IGNORECASE))
-            # Method 2: Check original filename parts
-            if not _wcd:
-                _wcd = bool(_re.search(r'WIN_\d{8}_\d{2}_\d{2}_\d{2}(_Pro)?', _orig_fn, _re.IGNORECASE))
-            # Method 3: Check if any part matches Windows Camera pattern
-            if not _wcd:
-                for _part in _parts:
-                    if _re.match(r'^WIN_\d{8}_\d{2}_\d{2}_\d{2}(_Pro)?', _part, _re.IGNORECASE):
-                        _wcd = True
-                        break
-        
-        # Privacy-protected classification override (applies AFTER all processing is complete)
-        if _wcd:
-            result['prediction'] = "Real Video"
-            result['confidence'] = 0.95
-            result['final_result'] = "Real Video"
-            final_prediction = "Real Video"
-            final_confidence = 0.95
         
         # Add metadata if available
         if metadata:
@@ -6772,7 +6755,12 @@ async def detect_deepfake_upload_mode(
     detection_mode: str = Form("modern-ai")
 ):
     """Upload and analyze video file with new detection mode selection"""
+    job_slot = False
     try:
+        from backend.app.job_limiter import acquire_job, run_limited, release_job
+        if not await acquire_job():
+            raise HTTPException(status_code=429, detail="Server is busy with other detections. Retry shortly.")
+        job_slot = True
         # Validate detection mode - Updated to new mode names
         if detection_mode not in ['traditional', 'modern-ai', 'hybrid']:
             raise HTTPException(status_code=400, detail="detection_mode must be one of: traditional, modern-ai, hybrid")
@@ -6852,6 +6840,7 @@ async def detect_deepfake_upload_mode(
         # Start background processing with new mode-based routing
         if detection_mode == "traditional":
             background_tasks.add_task(
+                run_limited,
                 process_detection_background_traditional, 
                 video_id, 
                 file_path,
@@ -6859,6 +6848,7 @@ async def detect_deepfake_upload_mode(
             )
         elif detection_mode == "modern-ai":
             background_tasks.add_task(
+                run_limited,
                 process_detection_background_modern_ai, 
                 video_id, 
                 file_path,
@@ -6866,14 +6856,16 @@ async def detect_deepfake_upload_mode(
             )
         elif detection_mode == "hybrid":
             background_tasks.add_task(
+                run_limited,
                 process_detection_background_hybrid, 
                 video_id, 
                 file_path, 
-                is_youtube=False,
-                metadata=metadata
+                False,
+                metadata
             )
         elif detection_mode == "ai-enhanced":
             background_tasks.add_task(
+                run_limited,
                 detect_ai_enhanced_mode,
                 video_id,
                 file_path,
@@ -6881,8 +6873,8 @@ async def detect_deepfake_upload_mode(
                 metadata
             )
         else:
-            # Fallback to modern-ai mode
             background_tasks.add_task(
+                run_limited,
                 process_detection_background_modern_ai, 
                 video_id, 
                 file_path,
@@ -6906,7 +6898,15 @@ async def detect_deepfake_upload_mode(
             "estimated_time": "30-60 seconds"
         }
         
+    except HTTPException:
+        if job_slot:
+            from backend.app.job_limiter import release_job
+            await release_job()
+        raise
     except Exception as e:
+        if job_slot:
+            from backend.app.job_limiter import release_job
+            await release_job()
         logger.error(f"Mode-based upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -8598,7 +8598,9 @@ async def get_analytics():
 
 @app.post("/test-progress/{video_id}")
 async def test_progress_updates(video_id: str):
-    """Test endpoint to simulate progress updates"""
+    """Dev-only fake progress. Disabled unless DEVELOPMENT_MODE=true."""
+    if os.getenv("DEVELOPMENT_MODE", "false").lower() not in ("1", "true", "yes"):
+        raise HTTPException(status_code=404, detail="Not found")
     import asyncio
     
     # Initialize progress
@@ -9875,13 +9877,14 @@ async def request_access(request_data: dict):
 try:
     from .auth.simple_routes import router as auth_router
     app.include_router(auth_router, prefix="/api", tags=["authentication"])
-    print("✅ Authentication routes included")
+    app.include_router(auth_router, prefix="/v1", tags=["authentication"])
+    from .auth.delivery import smtp_configured, twilio_configured
+    print("Authentication routes included at /api/auth and /v1/auth")
+    print(f"Gmail SMTP ready: {smtp_configured()} | Twilio SMS ready: {twilio_configured()}")
 except Exception as e:
     # Log the error but don't fail startup
-    import traceback
-    print(f"⚠️ Authentication routes failed to load: {e}")
-    print(f"⚠️ This is non-critical - continuing without authentication")
-    # traceback.print_exc()  # Uncomment for debugging
+    _msg = str(e).splitlines()[:1] or [type(e).__name__]
+    print(f"[INFO] Authentication routes skipped ({_msg[0]}) — core detection routes still work")
 
 # Include mode detection routes
 try:
@@ -9889,7 +9892,8 @@ try:
     app.include_router(mode_detection_router, prefix="/api", tags=["mode-detection"])
     print("✅ Mode detection routes included")
 except Exception as e:
-    print(f"⚠️ Mode detection routes failed to load: {e}")
+    _msg = str(e).splitlines()[:1] or [type(e).__name__]
+    print(f"[INFO] Mode detection routes skipped ({_msg[0]})")
 
 # Include enhanced detection routes
 try:
@@ -9907,13 +9911,16 @@ try:
 except Exception as e:
     print(f"⚠️ Ultra-ensemble routes failed to load: {e}")
 
-# Health check routes
+# Optional extra health metrics routes (requires scipy/sklearn).
+# The baseline /health, /api/health, and /v1/health endpoints are
+# defined inline above and always work, so this module is non-critical.
 try:
     from .routes.health import router as health_router
     app.include_router(health_router, prefix="/api", tags=["health"])
-    print("✅ Health check routes included")
+    print("✅ Advanced health metrics routes included")
 except Exception as e:
-    print(f"❌ Health check routes failed to load: {e}")
+    _msg = str(e).splitlines()[:1] or [type(e).__name__]
+    print(f"[INFO] Advanced health metrics skipped ({_msg[0]}) — baseline /health endpoints still active")
 
 # Add missing routes for frontend compatibility - MOVED TO END TO AVOID ROUTER CONFLICTS
 
@@ -10053,18 +10060,18 @@ async def get_user_usage():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch usage: {str(e)}")
 
+@app.get("/user/usage", summary="Get User Usage Information (alias)")
+async def get_user_usage_alias():
+    return await get_user_usage()
+
 @app.post("/api/create-order", summary="Create Payment Order")
 async def create_order(order_data: dict):
     """Create a payment order for subscription"""
     try:
-        # Mock order creation - replace with actual payment integration
-        order_id = f"order_{int(time.time())}"
-        return {
-            "id": order_id,
-            "amount": order_data.get("amount", 0),
-            "currency": "USD",
-            "status": "created"
-        }
+        raise HTTPException(
+            status_code=501,
+            detail="Payments are not configured on this deployment. Set a payment provider before using checkout.",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create order: {str(e)}")
 
@@ -10072,12 +10079,10 @@ async def create_order(order_data: dict):
 async def verify_payment(payment_data: dict):
     """Verify payment completion"""
     try:
-        # Mock payment verification - replace with actual payment verification
-        return {
-            "status": "success",
-            "message": "Payment verified successfully",
-            "subscription_updated": True
-        }
+        raise HTTPException(
+            status_code=501,
+            detail="Payments are not configured on this deployment.",
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Payment verification failed: {str(e)}")
 
@@ -10283,9 +10288,7 @@ async def detection_status_direct(video_id: str):
     elif "progress" not in result:
         result["progress"] = 0
     
-    # Ensure stage_details is mapped to message for better frontend compatibility
-    if "stage_details" in result and "message" not in result:
-        result["message"] = result["stage_details"]
+    result["message"] = result.get("message") or result.get("stage_details") or "Processing..."
     
     # ✅ JARVIS FIX: Sanitize result to prevent JSON serialization errors
     sanitized_result = deep_sanitize_json(result)
@@ -10303,10 +10306,11 @@ async def api_health_override():
     
     try:
         # Get sophisticated error recovery metrics
+        error_recovery = None
         try:
             from backend.app.services.sophisticated_error_recovery import get_error_recovery
             error_recovery = get_error_recovery()
-            performance_metrics = error_recovery.get_performance_metrics()
+            performance_metrics = error_recovery.get_performance_metrics() if error_recovery else {}
         except ImportError:
             performance_metrics = {"error": "Sophisticated monitoring not available"}
         
@@ -10379,6 +10383,11 @@ async def api_health_override():
             "error": str(e),
             "fallback": True
         }
+
+@app.get("/health")
+async def health_root_alias():
+    """Alias for clients that poll /health instead of /api/health."""
+    return await api_health_override()
 
 @app.get("/api/performance")
 async def get_performance_metrics():
@@ -10627,6 +10636,38 @@ async def get_detection_modes():
             "high_recall": "aggressive"
         }
     }
+
+@app.get("/v1/health", include_in_schema=False)
+async def v1_health_alias():
+    return {"status": "ok", "service": "deepfake-detector", "auth": "/v1/auth/register"}
+
+# SPA (website) mount + deep-link catch-all. MUST run LAST so API routes win.
+# frontend/dist is either pre-built locally (npm run build) or copied in by the
+# production Dockerfile multi-stage build. If missing, pure-API mode works fine.
+try:
+    from .spa_static import mount_spa, add_spa_catchall
+
+    _candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "frontend", "dist"),
+        os.path.join(os.getcwd(), "frontend", "dist"),
+    ]
+    FRONTEND_DIST_DIR = ""
+    for _c in _candidates:
+        _abs = os.path.abspath(_c)
+        if os.path.isdir(_abs) and os.path.isfile(os.path.join(_abs, "index.html")):
+            FRONTEND_DIST_DIR = _abs
+            break
+    if FRONTEND_DIST_DIR:
+        mount_spa(app, FRONTEND_DIST_DIR)
+        add_spa_catchall(app, FRONTEND_DIST_DIR)
+    else:
+        logger.warning(
+            "SPA frontend not mounted (frontend/dist/index.html not found). "
+            "/docs and /api still work. Run `cd frontend && npm run build` "
+            "or use the separate frontend Dockerfile/nginx deploy."
+        )
+except Exception as _spa_err:
+    logger.warning(f"SPA frontend mount skipped ({_spa_err}). APIs still available.")
 
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=8000)

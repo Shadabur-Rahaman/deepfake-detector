@@ -34,83 +34,91 @@ from PIL import Image
 import io
 import base64
 
-# Import all 12 advanced features
+_LOG = logging.getLogger(__name__)
+
+# Import all 12 advanced features.  Missing optional features are tracked and
+# summarised in a single INFO line rather than spamming WARNING:root for each.
+_MISSING_FEATURES: List[str] = []
+
 try:
-    from .advanced_ai_models import AdvancedAIModels, GPT4VisionDetector, Claude35SonnetDetector, Gemini20FlashDetector, LLaVADetector, DALL3Detector, StableDiffusionDetector
+    from .advanced_ai_models import AdvancedAIModels, GPT4VisionDetector, Claude35SonnetDetector, Gemini20FlashDetector, LLaVADetector, DALL3Detector, StableDiffusionDetector  # noqa: F401
     ADVANCED_AI_AVAILABLE = True
 except ImportError:
     ADVANCED_AI_AVAILABLE = False
-    logging.warning("Advanced AI models not available")
+    _MISSING_FEATURES.append("advanced_ai_models")
 
 try:
-    from .realtime_streaming import WebRTCStreamer, RealTimeDeepfakeProcessor
+    from .realtime_streaming import WebRTCStreamer, RealTimeDeepfakeProcessor  # noqa: F401
     REALTIME_STREAMING_AVAILABLE = True
 except ImportError:
     REALTIME_STREAMING_AVAILABLE = False
-    logging.warning("Real-time streaming not available")
+    _MISSING_FEATURES.append("realtime_streaming")
 
 try:
-    from .multimodal_detection import MultimodalDetector, AudioDeepfakeDetector, LipSyncAnalyzer, CrossModalAnalyzer
+    from .multimodal_detection import MultimodalDetector, AudioDeepfakeDetector, LipSyncAnalyzer, CrossModalAnalyzer  # noqa: F401
     MULTIMODAL_DETECTION_AVAILABLE = True
 except ImportError:
     MULTIMODAL_DETECTION_AVAILABLE = False
-    logging.warning("Multimodal detection not available")
+    _MISSING_FEATURES.append("multimodal_detection")
 
 try:
-    from .federated_learning import FederatedLearningServer, FederatedLearningClient
+    from .federated_learning import FederatedLearningServer, FederatedLearningClient  # noqa: F401
     FEDERATED_LEARNING_AVAILABLE = True
 except ImportError:
     FEDERATED_LEARNING_AVAILABLE = False
-    logging.warning("Federated learning not available")
+    _MISSING_FEATURES.append("federated_learning")
 
 try:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-    from edge_computing.tensorrt_optimization import TensorRTOptimizer, EdgeDeviceManager
+    from edge_computing.tensorrt_optimization import TensorRTOptimizer, EdgeDeviceManager  # noqa: F401
     EDGE_COMPUTING_AVAILABLE = True
 except ImportError:
     EDGE_COMPUTING_AVAILABLE = False
-    logging.warning("Edge computing not available")
+    _MISSING_FEATURES.append("edge_computing")
 
 try:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-    from blockchain.blockchain_verification import BlockchainVerificationSystem, ContentCertificate, CryptographicProof
+    from blockchain.blockchain_verification import BlockchainVerificationSystem, ContentCertificate, CryptographicProof  # noqa: F401
     BLOCKCHAIN_VERIFICATION_AVAILABLE = True
 except ImportError:
     BLOCKCHAIN_VERIFICATION_AVAILABLE = False
-    logging.warning("Blockchain verification not available")
+    _MISSING_FEATURES.append("blockchain_verification")
 
 try:
-    from .adversarial_robustness import AdversarialTraining, RobustnessEvaluator, AdversarialRobustnessSystem
+    from .adversarial_robustness import AdversarialTraining, RobustnessEvaluator, AdversarialRobustnessSystem  # noqa: F401
     ADVERSARIAL_ROBUSTNESS_AVAILABLE = True
 except ImportError:
     ADVERSARIAL_ROBUSTNESS_AVAILABLE = False
-    logging.warning("Adversarial robustness not available")
+    _MISSING_FEATURES.append("adversarial_robustness")
 
 try:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-    from enterprise.enterprise_features import EnterpriseAuth, AuditLogger, ComplianceManager, CustomModelTrainer
+    from enterprise.enterprise_features import EnterpriseAuth, AuditLogger, ComplianceManager, CustomModelTrainer  # noqa: F401
     ENTERPRISE_FEATURES_AVAILABLE = True
 except ImportError:
     ENTERPRISE_FEATURES_AVAILABLE = False
-    logging.warning("Enterprise features not available")
+    _MISSING_FEATURES.append("enterprise_features")
 
 try:
     import sys
     import os
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-    from cloud_api.main import app as cloud_api_app
+    from cloud_api.main import app as cloud_api_app  # noqa: F401
     CLOUD_API_AVAILABLE = True
 except ImportError:
     CLOUD_API_AVAILABLE = False
-    logging.warning("Cloud API service not available")
+    _MISSING_FEATURES.append("cloud_api")
 
-logger = logging.getLogger(__name__)
+if _MISSING_FEATURES:
+    _LOG.info("SuperAdvanced: optional features skipped (%s) — install deps for full mode", ", ".join(_MISSING_FEATURES))
+
+logger = _LOG
 
 class SuperAdvancedDetectionMode:
     """

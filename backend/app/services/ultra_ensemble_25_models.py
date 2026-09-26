@@ -1175,12 +1175,8 @@ class UltraEnsemble25Models:
             if not faces:
                 return {"authenticity_score": 0.0}
 
-            # Heuristic 1: filename pattern suggests Windows Camera (e.g., WIN_....mp4)
+            # Filename is not evidence of authenticity (Windows Camera names were previously cheated).
             filename_bonus = 0.0
-            if video_path:
-                basename = os.path.basename(video_path)
-                if basename.startswith("WIN_") or "WIN_" in basename:
-                    filename_bonus = 0.2
 
             # Heuristic 2: single face across frames
             face_count = len(faces)

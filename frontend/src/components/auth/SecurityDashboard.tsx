@@ -4,7 +4,7 @@
  * for authenticated users with enterprise-grade security features.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
   Download, RefreshCw, Settings, Bell, Zap, Crown, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_CONFIG } from '@/config/api';
 
 interface SecurityEvent {
   event_type: string;
@@ -50,6 +51,12 @@ export const SecurityDashboard: React.FC = () => {
     getSecurityEvents,
     getCsrfToken 
   } = useAuth();
+
+  const apiBase = useMemo(() => {
+    if (API_CONFIG.BASE_URL) return API_CONFIG.BASE_URL;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return 'http://127.0.0.1:8000';
+  }, []);
 
   // State management
   const [activeTab, setActiveTab] = useState('overview');
@@ -685,7 +692,7 @@ export const SecurityDashboard: React.FC = () => {
                 <div className="space-y-2">
                   <Label>API Endpoint</Label>
                   <Input 
-                    value="http://127.0.0.1:8000/api" 
+                    value={`${apiBase}/api`} 
                     readOnly 
                     className="font-mono text-xs"
                   />

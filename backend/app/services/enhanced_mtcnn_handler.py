@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 # Global MTCNN availability flag
 MTCNN_AVAILABLE = False
 MTCNN_DETECTOR = None
+_MTCNN_INIT_ATTEMPTED = False
+_MTCNN_INIT_SUCCESS = False
+
+
+def _mtcnn_short_err(exc: BaseException) -> str:
+    """1-line error summary to avoid huge stack traces in startup logs."""
+    head = str(exc).strip().splitlines()[:1]
+    return head[0] if head else type(exc).__name__
 
 def apply_mtcnn_nuclear_fix():
     """Apply comprehensive MTCNN fixes to prevent recursion errors"""
@@ -124,27 +132,34 @@ def create_mtcnn_compatibility_wrapper():
         return None
 
 def initialize_mtcnn_safely():
-    """Initialize MTCNN with comprehensive error handling - DISABLED to prevent segmentation faults"""
-    global MTCNN_AVAILABLE, MTCNN_DETECTOR
-    
+    """Initialize MTCNN with comprehensive error handling (idempotent)."""
+    global MTCNN_AVAILABLE, MTCNN_DETECTOR, _MTCNN_INIT_ATTEMPTED, _MTCNN_INIT_SUCCESS
+
+    if _MTCNN_INIT_ATTEMPTED:
+        return _MTCNN_INIT_SUCCESS
+    _MTCNN_INIT_ATTEMPTED = True
+
     # MTCNN enabled for better face detection
     try:
-        from services.mtcnn_python313_fix import MTCNN_Python313_Fix
+        from services.mtcnn_python313_fix import MTCNN_Python313_Fix  # type: ignore
         mtcnn_fix = MTCNN_Python313_Fix()
-        if mtcnn_fix and mtcnn_fix.available:
+        if mtcnn_fix and getattr(mtcnn_fix, "available", False):
             MTCNN_AVAILABLE = True
             MTCNN_DETECTOR = mtcnn_fix
-            logger.info("✅ MTCNN enabled for face detection")
+            logger.info("MTCNN enabled for face detection")
+            _MTCNN_INIT_SUCCESS = True
             return True
         else:
             MTCNN_AVAILABLE = False
             MTCNN_DETECTOR = None
-            logger.warning("⚠️ MTCNN not available - using fallback methods")
+            logger.info("MTCNN not available — YOLO/OpenCV Haar cascade fallbacks will be used for faces")
+            _MTCNN_INIT_SUCCESS = False
             return False
     except Exception as e:
         MTCNN_AVAILABLE = False
         MTCNN_DETECTOR = None
-        logger.warning(f"⚠️ MTCNN failed to load: {e} - using fallback methods")
+        logger.info("MTCNN unavailable (%s) — using YOLO/Haar cascade fallbacks for faces", _mtcnn_short_err(e))
+        _MTCNN_INIT_SUCCESS = False
         return False
 
 def detect_faces_mtcnn(image: np.ndarray) -> List[Dict[str, Any]]:

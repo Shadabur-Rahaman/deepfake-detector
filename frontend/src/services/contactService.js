@@ -5,12 +5,16 @@
 
 import mockBackend from './mockBackend';
 
+function _apiBase() {
+  return import.meta.env.VITE_API_URL ?? "";
+}
+
 class ContactService {
   constructor() {
-    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+    this.baseURL = _apiBase();
     this.websocket = null;
     this.listeners = new Map();
-    this.useMockBackend = process.env.NODE_ENV === 'development' || !process.env.REACT_APP_API_URL;
+    this.useMockBackend = import.meta.env.DEV && !_apiBase();
   }
 
   // Event System

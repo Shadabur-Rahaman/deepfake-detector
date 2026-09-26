@@ -1,264 +1,215 @@
-"""
-Simple Database Module for Deepfake Detection
-This module provides basic database functionality without complex dependencies.
+"""simple_database compatibility shim.
+
+Older modules (mode_detection.py, main.py imports) reference `simple_database`.
+The real implementation lives in :mod:`backend.app.database`.  This module
+re-exports the public names from there so imports of the form::
+
+    from simple_database import create_detection_job_record
+    from ..simple_database import setup_database, get_db
+
+continue to work without any caller-side changes.  If :mod:`.database` is
+ever removed or fails to load, an in-memory dictionary store is used as a
+last-resort fallback (matching the "Continuing with in-memory storage
+fallback" behaviour in :mod:`backend.app.main`).
 """
 
-import os
+from __future__ import annotations
+
 import logging
-from typing import Optional, Dict, Any
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.pool import StaticPool
+import os
+import sys
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Create SQLAlchemy Base
-Base = declarative_base()
 
-# Global database state
-DATABASE_AVAILABLE = False
-engine = None
-SessionLocal = None
+def _try_import_real():
+    """Import the real :mod:`backend.app.database` module with multiple strategies.
 
-def setup_database():
-    """Setup simple SQLite database"""
-    global DATABASE_AVAILABLE, engine, SessionLocal
-    
+    The same Python file can be imported under 3 different ``sys.path``
+    configurations inside this project:
+      * ``from backend.app.simple_database import ...`` (proper package import)
+      * ``from .simple_database import ...`` (inside ``backend.app``)
+      * bare ``import simple_database`` after ``sys.path`` includes
+        ``backend/app`` (used by older callers in :mod:`backend.app.main`).
+
+    In the last case, a relative ``from .database import ...`` fails with
+    ``attempted relative import with no known parent package``, which is
+    exactly the line that appeared in production startup logs.
+    """
+
+    # Strategy 1 — clean package import.
     try:
-        # Create SQLite database
-        database_url = "sqlite:///./detection_jobs.db"
-        engine = create_engine(
-            database_url,
-            connect_args={"check_same_thread": False},
-            poolclass=StaticPool
+        from backend.app import database as _db  # type: ignore
+        return _db
+    except Exception:
+        pass
+
+    # Strategy 2 — relative import (works when we're a package submodule).
+    try:
+        from . import database as _db  # type: ignore
+        return _db
+    except Exception:
+        pass
+
+    # Strategy 3 — sys.path append + absolute import by bare name.
+    here = Path(__file__).resolve().parent
+    if str(here) not in sys.path:
+        sys.path.insert(0, str(here))
+    try:
+        import database as _db  # type: ignore
+        return _db
+    except Exception as exc:
+        logger.info(
+            "simple_database: real backend.app.database module not importable "
+            "(%s: %s). Switching to in-memory fallback store.",
+            type(exc).__name__,
+            exc,
         )
-        
-        # Test connection
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        
-        # Create session factory
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        
-        # Create tables if they don't exist
-        try:
-            from .db_models import DetectionJob
-            Base.metadata.create_all(bind=engine)
-            logger.info("✅ Database tables created successfully")
-        except ImportError as e:
-            logger.warning(f"⚠️ Import failed, trying alternative import: {e}")
-            try:
-                from app.db_models import DetectionJob
-                Base.metadata.create_all(bind=engine)
-                logger.info("✅ Database tables created successfully with alternative import")
-            except Exception as e2:
-                logger.warning(f"⚠️ Alternative import also failed: {e2}")
-                # Create the table manually
-                try:
-                    from sqlalchemy import Column, String, Integer, Float, DateTime, Text, JSON
-                    from sqlalchemy.sql import func
-                    import uuid
-                    
-                    class DetectionJob(Base):
-                        """Database model for detection jobs"""
-                        __tablename__ = "detection_jobs"
-                        
-                        id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-                        video_id = Column(String(36), unique=True, nullable=False, index=True)
-                        status = Column(String(20), default="processing", nullable=False)
-                        progress = Column(Integer, default=0, nullable=False)
-                        mode = Column(String(20), nullable=False)
-                        file_path = Column(String(500), nullable=True)
-                        original_filename = Column(String(255), nullable=True)
-                        file_size = Column(Integer, nullable=True)
-                        result = Column(JSON, nullable=True)
-                        confidence = Column(Float, nullable=True)
-                        error = Column(Text, nullable=True)
-                        faces_analyzed = Column(Integer, default=0)
-                        processing_time = Column(Float, default=0)
-                        created_at = Column(DateTime(timezone=True), server_default=func.now())
-                        updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-                    
-                    Base.metadata.create_all(bind=engine)
-                    logger.info("✅ Database tables created successfully with manual model definition")
-                except Exception as e3:
-                    logger.error(f"❌ Manual table creation failed: {e3}")
-        except Exception as e:
-            logger.warning(f"⚠️ Table creation failed: {e}")
-        
-        DATABASE_AVAILABLE = True
-        return True, "SQLite database initialized successfully"
-        
-    except Exception as e:
-        logger.error(f"❌ Database setup failed: {e}")
-        DATABASE_AVAILABLE = False
-        return False, str(e)
-
-def ensure_detection_jobs_table():
-    """Ensure the detection_jobs table exists"""
-    if not DATABASE_AVAILABLE or not engine:
-        return False
-    
-    try:
-        # Check if table exists
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='detection_jobs'"))
-            if result.fetchone():
-                return True
-        
-        # Table doesn't exist, create it
-        from sqlalchemy import Column, String, Integer, Float, DateTime, Text, JSON
-        from sqlalchemy.sql import func
-        import uuid
-        
-        class DetectionJob(Base):
-            """Database model for detection jobs"""
-            __tablename__ = "detection_jobs"
-            
-            id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-            video_id = Column(String(36), unique=True, nullable=False, index=True)
-            status = Column(String(20), default="processing", nullable=False)
-            progress = Column(Integer, default=0, nullable=False)
-            mode = Column(String(20), nullable=False)
-            file_path = Column(String(500), nullable=True)
-            original_filename = Column(String(255), nullable=True)
-            file_size = Column(Integer, nullable=True)
-            result = Column(JSON, nullable=True)
-            confidence = Column(Float, nullable=True)
-            error = Column(Text, nullable=True)
-            faces_analyzed = Column(Integer, default=0)
-            processing_time = Column(Float, default=0)
-            created_at = Column(DateTime(timezone=True), server_default=func.now())
-            updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-        
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Detection jobs table created successfully")
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to ensure detection_jobs table: {e}")
-        return False
-
-def force_recreate_database():
-    """Force recreate the entire database"""
-    global DATABASE_AVAILABLE, engine, SessionLocal
-    
-    try:
-        if engine:
-            # Drop all tables
-            Base.metadata.drop_all(bind=engine)
-            logger.info("🗑️ Dropped all existing tables")
-        
-        # Recreate tables
-        Base.metadata.create_all(bind=engine)
-        logger.info("✅ Recreated all database tables")
-        
-        # Ensure detection_jobs table specifically
-        ensure_detection_jobs_table()
-        
-        return True
-    except Exception as e:
-        logger.error(f"❌ Failed to recreate database: {e}")
-        return False
-
-def get_db():
-    """FastAPI dependency to get database session"""
-    if not DATABASE_AVAILABLE or not SessionLocal:
         return None
-    
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-def create_detection_job_record(video_id: str, status: str, mode: str, file_path: str, filename: str):
-    """Create a detection job record"""
-    if not DATABASE_AVAILABLE:
-        return False
-    
-    try:
-        # Ensure table exists first
-        ensure_detection_jobs_table()
-        
-        # Try multiple import paths
-        try:
-            from .db_models import DetectionJob
-        except ImportError:
-            try:
-                from app.db_models import DetectionJob
-            except ImportError:
-                from backend.app.db_models import DetectionJob
-        
-        db = SessionLocal()
-        job = DetectionJob(
-            video_id=video_id,
-            status=status,
-            mode=mode,
-            file_path=file_path,
-            original_filename=filename  # Fixed: use original_filename instead of filename
+
+_db = _try_import_real()
+
+# Pick up only the names that are *actually* exposed by the real module;
+# missing names fall back to the local in-memory implementation below.
+if _db is not None:
+    _real_names = set(dir(_db))
+    setup_database = _db.setup_database if "setup_database" in _real_names else None
+    ensure_detection_jobs_table = (
+        _db.ensure_detection_jobs_table
+        if "ensure_detection_jobs_table" in _real_names
+        else None
+    )
+    create_detection_job_record = (
+        _db.create_detection_job_record if "create_detection_job_record" in _real_names else None
+    )
+    get_detection_job_record = (
+        _db.get_detection_job_record if "get_detection_job_record" in _real_names else None
+    )
+    update_detection_job_record = (
+        _db.update_detection_job_record if "update_detection_job_record" in _real_names else None
+    )
+    get_db = _db.get_db if "get_db" in _real_names else None
+    _REAL_DB = all(
+        n is not None
+        for n in (
+            setup_database,
+            ensure_detection_jobs_table,
+            create_detection_job_record,
+            get_detection_job_record,
+            update_detection_job_record,
+            get_db,
         )
-        db.add(job)
-        db.commit()
-        db.close()
-        return True
-    except Exception as e:
-        logger.error(f"Failed to create detection job record: {e}")
-        return False
+    )
+else:
+    setup_database = None
+    ensure_detection_jobs_table = None
+    create_detection_job_record = None
+    get_detection_job_record = None
+    update_detection_job_record = None
+    get_db = None
+    _REAL_DB = False
 
-def get_detection_job_record(video_id: str):
-    """Get a detection job record"""
-    if not DATABASE_AVAILABLE:
-        return None
-    
-    try:
-        # Ensure table exists first
-        ensure_detection_jobs_table()
-        
-        # Try multiple import paths
-        try:
-            from .db_models import DetectionJob
-        except ImportError:
-            try:
-                from app.db_models import DetectionJob
-            except ImportError:
-                from backend.app.db_models import DetectionJob
-        
-        db = SessionLocal()
-        job = db.query(DetectionJob).filter(DetectionJob.video_id == video_id).first()
-        db.close()
-        return job
-    except Exception as e:
-        logger.error(f"Failed to get detection job record: {e}")
-        return None
 
-def update_detection_job_record(video_id: str, **updates):
-    """Update a detection job record"""
-    if not DATABASE_AVAILABLE:
-        return False
-    
-    try:
-        # Ensure table exists first
-        ensure_detection_jobs_table()
-        
-        # Try multiple import paths
+if not _REAL_DB:
+    # ------------------------------------------------------------------
+    # Last-resort in-memory dict store. Matches the exact public contract
+    # of backend.app.database's helpers, so callers (mode_detection routes,
+    # startup event in main.py) behave identically whether sqlite, file,
+    # or in-memory store is active.
+    # ------------------------------------------------------------------
+    _store_lock = threading.Lock()
+    _IN_MEMORY_STORE: Dict[str, Dict[str, Any]] = {}
+
+    def setup_database() -> Tuple[bool, str]:  # type: ignore[no-redef]
+        return True, "in-memory fallback store"
+
+    def ensure_detection_jobs_table() -> Tuple[bool, str]:  # type: ignore[no-redef]
+        return True, "in-memory detection jobs table ready"
+
+    def create_detection_job_record(  # type: ignore[no-redef]
+        video_id: str,
+        mode: str,
+        file_path: str,
+        original_filename: Optional[str] = None,
+        file_size: Optional[int] = None,
+        filename: Optional[str] = None,
+        youtube_url: Optional[str] = None,
+        status: str = "pending",
+        **extra: Any,
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+        job_id = str(uuid.uuid4())
+        record: Dict[str, Any] = {
+            "job_id": job_id,
+            "video_id": video_id,
+            "mode": mode,
+            "file_path": file_path,
+            "original_filename": original_filename or filename,
+            "filename": filename or original_filename,
+            "file_size": file_size,
+            "youtube_url": youtube_url,
+            "status": status,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        }
+        record.update(extra)
+        with _store_lock:
+            _IN_MEMORY_STORE[video_id] = record
+            _IN_MEMORY_STORE[job_id] = record
+        return True, job_id, record
+
+    def get_detection_job_record(video_id: str) -> Optional[Dict[str, Any]]:  # type: ignore[no-redef]
+        with _store_lock:
+            return _IN_MEMORY_STORE.get(video_id)
+
+    def update_detection_job_record(video_id: str, **updates: Any) -> Tuple[bool, str]:  # type: ignore[no-redef]
+        with _store_lock:
+            rec = _IN_MEMORY_STORE.get(video_id)
+            if rec is None:
+                return False, f"job not found for video_id={video_id}"
+            rec.update(updates)
+            rec["updated_at"] = time.time()
+            _IN_MEMORY_STORE[video_id] = rec
+            if rec.get("job_id") and rec["job_id"] in _IN_MEMORY_STORE:
+                _IN_MEMORY_STORE[rec["job_id"]] = rec
+            return True, "updated"
+
+    class _DummySession:
+        def close(self) -> None:
+            return None
+
+        def __enter__(self):  # pragma: no cover - trivial context manager
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # pragma: no cover
+            self.close()
+
+    def get_db():  # type: ignore[no-redef]
+        s = _DummySession()
         try:
-            from .db_models import DetectionJob
-        except ImportError:
-            try:
-                from app.db_models import DetectionJob
-            except ImportError:
-                from backend.app.db_models import DetectionJob
-        
-        db = SessionLocal()
-        job = db.query(DetectionJob).filter(DetectionJob.video_id == video_id).first()
-        if job:
-            for key, value in updates.items():
-                if hasattr(job, key):
-                    setattr(job, key, value)
-            db.commit()
-        db.close()
-        return True
-    except Exception as e:
-        logger.error(f"Failed to update detection job record: {e}")
-        return False
+            yield s
+        finally:
+            s.close()
+
+
+__all__ = [
+    "setup_database",
+    "ensure_detection_jobs_table",
+    "create_detection_job_record",
+    "get_detection_job_record",
+    "update_detection_job_record",
+    "get_db",
+]
+
+# Set backend.app.database-equivalent env flag so startup log can report
+# whether we fell back to memory or loaded the real store.  The logger is
+# module-qualified (not root WARNING:root) to keep startup logs clean.
+if _REAL_DB:
+    logger.info("simple_database: backed by backend.app.database (%s)", getattr(_db, "__file__", "builtin"))
+else:
+    logger.info("simple_database: using in-memory fallback store")

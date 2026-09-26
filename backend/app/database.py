@@ -255,6 +255,21 @@ def create_tables():
     manager = get_database_manager()
     manager.create_tables()
 
+
+def ensure_detection_jobs_table() -> Tuple[bool, str]:
+    """Ensure the detection jobs backing store exists (idempotent).
+
+    Alias of :func:`create_tables` maintained for backwards compatibility
+    with callers that import the function as ``ensure_detection_jobs_table``
+    (e.g. ``simple_database`` re-exports, ``mode_detection`` routes, and
+    the FastAPI startup event in :mod:`backend.app.main`).
+    """
+    try:
+        create_tables()
+        return True, "detection jobs store ready"
+    except Exception as exc:  # pragma: no cover - best-effort helper
+        return False, f"ensure_detection_jobs_table failed: {exc}"
+
 # Database operation helpers
 def create_detection_job_record(video_id: str, mode: str, file_path: str, 
                                original_filename: str, file_size: int):

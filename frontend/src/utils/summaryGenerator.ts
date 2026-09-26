@@ -1,6 +1,8 @@
 // AI-Powered Summary Generator for Deepfake Detection Results
 // Dynamically generates contextual explanations based on detection metadata
 
+import { API_CONFIG } from "@/config/api";
+
 export interface DetectionMetadata {
   final_result: string;
   confidence: number;
@@ -137,8 +139,8 @@ export class AISummaryGenerator {
    */
   private async generateAISummary(metadata: DetectionMetadata, mode: string): Promise<string | null> {
     try {
-      // Get API base URL from environment or default to localhost
-      const apiBaseUrl = process.env.REACT_APP_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      // Get API base URL from centralized config with Node fallback
+      const apiBaseUrl = API_CONFIG.BASE_URL || (typeof window !== "undefined" ? window.location.origin : "http://127.0.0.1:8000");
       
         // Extract artifact scores from backend logs
         const artifactScores = (metadata as any).artifact_scores || 

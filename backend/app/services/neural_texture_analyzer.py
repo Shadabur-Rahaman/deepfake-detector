@@ -53,11 +53,13 @@ class NeuralTextureAnalyzer:
         try:
             logger.info(f"🧠 Starting neural texture analysis on {len(faces)} faces...")
             
-            # Analyze texture patterns
+            # Analyze texture patterns from the actual pixels
+            from .signal_features import score_faces
+            scored = score_faces(faces)
             texture_artifacts = {
-                'texture_inconsistency': 0.3 + np.random.normal(0, 0.1),
-                'neural_pattern_anomaly': 0.4 + np.random.normal(0, 0.1),
-                'synthetic_texture_score': 0.2 + np.random.normal(0, 0.1)
+                'texture_inconsistency': float(scored.get('blur', 0.3)),
+                'neural_pattern_anomaly': float(scored.get('hf', 0.4)),
+                'synthetic_texture_score': float(scored.get('p_fake', 0.5)),
             }
             
             # Make prediction

@@ -96,9 +96,6 @@ class HardenedAuthCore:
         self.users = {}
         self.sessions = {}
         self.audit_logs = []
-        
-        # Initialize default data
-        self._initialize_default_data()
     
     def _get_secret_key(self) -> str:
         """Get or generate secret key for JWT signing"""
@@ -129,46 +126,6 @@ class HardenedAuthCore:
         except Exception as e:
             logger.warning(f"[WARNING] Password context creation failed: {e}, using fallback")
             return None
-    
-    def _initialize_default_data(self) -> None:
-        """Initialize default users and roles"""
-        try:
-            # Admin user
-            admin_password = self._hash_password("Admin123!@#")
-            self.users["admin@ifake.com"] = {
-                "id": "admin_001",
-                "email": "admin@ifake.com",
-                "username": "admin",
-                "password_hash": admin_password,
-                "full_name": "System Administrator",
-                "is_active": True,
-                "is_verified": True,
-                "roles": ["admin"],
-                "created_at": datetime.utcnow(),
-                "failed_login_attempts": 0,
-                "locked_until": None
-            }
-            
-            # Demo user
-            demo_password = self._hash_password("Demo123!@#")
-            self.users["demo@ifake.com"] = {
-                "id": "demo_001",
-                "email": "demo@ifake.com",
-                "username": "demo",
-                "password_hash": demo_password,
-                "full_name": "Demo User",
-                "is_active": True,
-                "is_verified": True,
-                "roles": ["user"],
-                "created_at": datetime.utcnow(),
-                "failed_login_attempts": 0,
-                "locked_until": None
-            }
-            
-            logger.info("[OK] Default users initialized")
-            
-        except Exception as e:
-            logger.error(f"[ERROR] Default data initialization failed: {str(e)}")
     
     def _hash_password(self, password: str) -> str:
         """Hash password using the configured context"""

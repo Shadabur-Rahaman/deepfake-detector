@@ -3,8 +3,8 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
-ARG VITE_API_URL=http://localhost:8000
-ARG VITE_WS_URL=ws://localhost:8000/ws/admin
+ARG VITE_API_URL=
+ARG VITE_WS_URL=
 ARG VITE_BASE_PATH=/
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_WS_URL=$VITE_WS_URL

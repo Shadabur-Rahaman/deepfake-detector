@@ -83,6 +83,7 @@ Thumbs.db
 .cursor/
 
 # Local junk
+_unwanted/
 backup/
 backups/
 debug_frame_*
@@ -94,6 +95,6 @@ unified_auth.json
 z_how_to_run.txt
 
 # Academic / presentation drafts (keep source in git history if previously committed)
-*.pptx
-*.docx
-PROJECT_SYNOPSIS.pdf
+
+.vercel/
+.trae/

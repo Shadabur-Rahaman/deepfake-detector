@@ -28,6 +28,7 @@ import {
   Share, 
   RefreshCw 
 } from 'lucide-react';
+import { API_BASE_URL } from '@/config/api';
 
 interface SuperAdvancedDetectionProps {
   videoId?: string;
@@ -160,7 +161,7 @@ const SuperAdvancedDetection: React.FC<SuperAdvancedDetectionProps> = ({
       setCurrentStep('Uploading video...');
       setProgress(10);
 
-      const response = await fetch('/api/detect-deepfake-upload-mode', {
+      const response = await fetch(`${API_BASE_URL}/v1/detect`, {
         method: 'POST',
         body: formData,
       });
@@ -187,7 +188,7 @@ const SuperAdvancedDetection: React.FC<SuperAdvancedDetectionProps> = ({
       // Poll for results
       const pollResults = async () => {
         try {
-          const statusResponse = await fetch(`/detection-status/${data.video_id}`);
+          const statusResponse = await fetch(`${API_BASE_URL}/v1/jobs/${data.video_id}`);
           const statusData = await statusResponse.json();
           
           if (statusData.status === 'completed') {

@@ -137,13 +137,11 @@ class YOLOv8DetectionScorer:
                     size_score = min(1.0, face_area / (224 * 224))  # Normalize to 224x224
                     face_sizes.append(size_score)
                     
-                    # Blur detection using Laplacian variance
                     gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY) if len(face.shape) == 3 else face
-                    blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-                    blur_scores.append(min(1.0, blur_score / 1000))  # Normalize
-                    
-                    # Overall quality score
-                    quality_score = (max_conf * 0.4 + size_score * 0.3 + blur_score * 0.3)
+                    blur_raw = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                    blur_norm = min(1.0, max(0.0, blur_raw / 1000.0))
+                    blur_scores.append(blur_norm)
+                    quality_score = float(np.clip(max_conf * 0.4 + size_score * 0.3 + blur_norm * 0.3, 0.0, 1.0))
                     scores.append(quality_score)
                 else:
                     # No face detected
@@ -208,11 +206,10 @@ class YOLOv8DetectionScorer:
                     
                     # Blur detection
                     face_roi = gray[y:y+h, x:x+w]
-                    blur_score = cv2.Laplacian(face_roi, cv2.CV_64F).var()
-                    blur_scores.append(min(1.0, blur_score / 1000))
-                    
-                    # Overall quality score
-                    quality_score = (conf * 0.4 + size_score * 0.3 + blur_score * 0.3)
+                    blur_raw = float(cv2.Laplacian(face_roi, cv2.CV_64F).var())
+                    blur_norm = min(1.0, max(0.0, blur_raw / 1000.0))
+                    blur_scores.append(blur_norm)
+                    quality_score = float(np.clip(conf * 0.4 + size_score * 0.3 + blur_norm * 0.3, 0.0, 1.0))
                     scores.append(quality_score)
                 else:
                     # No face detected
@@ -265,18 +262,15 @@ class YOLOv8DetectionScorer:
             Prediction with confidence
         """
         try:
-            avg_quality = scores.get('avg_quality_score', 0.0)
-            detection_rate = scores.get('detection_rate', 0.0)
-            avg_confidence = scores.get('avg_confidence', 0.0)
+            avg_quality = float(np.clip(scores.get('avg_quality_score', 0.0) or 0.0, 0.0, 1.0))
+            detection_rate = float(np.clip(scores.get('detection_rate', 0.0) or 0.0, 0.0, 1.0))
             
-            # Combine metrics for prediction
-            # Lower quality scores and detection rates suggest potential deepfakes
             if detection_rate < 0.3 or avg_quality < 0.3:
                 prediction = 'deepfake'
-                confidence = min(0.9, 0.5 + (0.3 - avg_quality) * 2)
+                confidence = float(np.clip(0.5 + (0.3 - avg_quality) * 2, 0.0, 0.9))
             elif detection_rate > 0.7 and avg_quality > 0.6:
                 prediction = 'real'
-                confidence = min(0.9, 0.5 + (avg_quality - 0.6) * 2)
+                confidence = float(np.clip(0.5 + (avg_quality - 0.6) * 2, 0.0, 0.9))
             else:
                 prediction = 'uncertain'
                 confidence = 0.5

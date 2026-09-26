@@ -247,7 +247,7 @@ curl -X GET "https://api.ifake.com/detection-status/JOB_ID" \\
                 </Link>
               </Button>
               <Button variant="outline" className="neural-card neural-button" asChild>
-                <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener noreferrer">
+                <a href="/docs" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Interactive API Docs
                 </a>

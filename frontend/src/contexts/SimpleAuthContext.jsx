@@ -15,35 +15,32 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Initialize authentication state
   useEffect(() => {
-    const initAuth = () => {
+    const initAuth = async () => {
       try {
-        const currentUser = authService.getCurrentUserInfo();
-        if (currentUser) {
-          setUser(currentUser);
-        }
+        const currentUser = await authService.restore();
+        if (currentUser) setUser(currentUser);
       } catch (error) {
         console.error('Auth initialization error:', error);
       } finally {
         setIsLoading(false);
       }
     };
-
     initAuth();
   }, []);
 
-  // Login function
-  const login = async (email, password) => {
+  const login = async (email, password, phone) => {
     setIsLoading(true);
     try {
-      const result = await authService.login(email, password);
+      const result = await authService.login(email, password, phone);
+      if (result.needs_verification) {
+        return result;
+      }
       if (result.success) {
         setUser(result.user);
         return { success: true, user: result.user };
-      } else {
-        return { success: false, message: result.message };
       }
+      return { success: false, message: result.message };
     } catch (error) {
       return { success: false, message: error.message };
     } finally {
@@ -51,16 +48,34 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Register function
+  const verifyLogin = async (payload) => {
+    setIsLoading(true);
+    try {
+      const result = await authService.verifyLogin(payload);
+      if (result.success) {
+        setUser(result.user);
+        return { success: true, user: result.user };
+      }
+      return { success: false, message: result.message };
+    } catch (error) {
+      return { success: false, message: error.message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const register = async (userData) => {
     setIsLoading(true);
     try {
       const result = await authService.register(userData);
-      if (result.success) {
-        return { success: true, user: result.user };
-      } else {
-        return { success: false, message: result.message };
+      if (result.needs_verification) {
+        return result;
       }
+      if (result.success) {
+        setUser(result.user);
+        return { success: true, user: result.user };
+      }
+      return { success: false, message: result.message };
     } catch (error) {
       return { success: false, message: error.message };
     } finally {
@@ -68,7 +83,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Logout function
+  const verifyRegister = async (payload) => {
+    setIsLoading(true);
+    try {
+      const result = await authService.verifyRegister(payload);
+      if (result.success) {
+        setUser(result.user);
+        return { success: true, user: result.user };
+      }
+      return { success: false, message: result.message };
+    } catch (error) {
+      return { success: false, message: error.message };
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     setIsLoading(true);
     try {
@@ -76,57 +106,25 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       return { success: true };
     } catch (error) {
+      setUser(null);
       return { success: false, message: error.message };
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Update profile function
-  const updateProfile = async (updates) => {
-    setIsLoading(true);
-    try {
-      const result = await authService.updateProfile(updates);
-      if (result.success) {
-        setUser(result.user);
-        return { success: true, user: result.user };
-      } else {
-        return { success: false, message: result.message };
-      }
-    } catch (error) {
-      return { success: false, message: error.message };
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Change password function
-  const changePassword = async (currentPassword, newPassword) => {
-    setIsLoading(true);
-    try {
-      const result = await authService.changePassword(currentPassword, newPassword);
-      return result;
-    } catch (error) {
-      return { success: false, message: error.message };
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Check if user is authenticated
-  const isAuthenticated = () => {
-    return user !== null;
-  };
+  const isAuthenticated = Boolean(user);
 
   const value = {
     user,
     isLoading,
     login,
+    verifyLogin,
     register,
+    verifyRegister,
     logout,
-    updateProfile,
-    changePassword,
-    isAuthenticated
+    isAuthenticated,
+    getAccessToken: () => authService.accessToken(),
   };
 
   return (

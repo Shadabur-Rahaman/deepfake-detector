@@ -416,9 +416,6 @@ sys.modules['sqlite3'] = fallback_module
                 'sessions': {}
             }
             
-            # Create default users
-            await self._create_default_users(auth_system)
-            
             return auth_system
             
         except Exception as e:
@@ -426,42 +423,9 @@ sys.modules['sqlite3'] = fallback_module
             raise
     
     async def _create_default_users(self, auth_system: Dict[str, Any]) -> None:
-        """Create default users"""
-        try:
-            # Admin user
-            admin_password = auth_system['pwd_context'].hash("Admin123!@#")
-            auth_system['users']['admin@ifake.com'] = {
-                'id': 'admin_001',
-                'email': 'admin@ifake.com',
-                'username': 'admin',
-                'password_hash': admin_password,
-                'full_name': 'System Administrator',
-                'is_active': True,
-                'is_verified': True,
-                'roles': ['admin'],
-                'created_at': datetime.utcnow()
-            }
-            
-            # Demo user
-            demo_password = auth_system['pwd_context'].hash("Demo123!@#")
-            auth_system['users']['demo@ifake.com'] = {
-                'id': 'demo_001',
-                'email': 'demo@ifake.com',
-                'username': 'demo',
-                'password_hash': demo_password,
-                'full_name': 'Demo User',
-                'is_active': True,
-                'is_verified': True,
-                'roles': ['user'],
-                'created_at': datetime.utcnow()
-            }
-            
-            logger.info("[OK] Default users created")
-            
-        except Exception as e:
-            logger.error(f"[ERROR] Default users creation failed: {str(e)}")
-            raise
-    
+        """Create default users (production: no hardcoded users)"""
+        return
+
     async def _patch_database_schema(self) -> None:
         """Create runtime database schema"""
         try:

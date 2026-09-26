@@ -12,6 +12,22 @@ export default defineConfig({
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
       },
+      "/v1": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/detection-status": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/detect-modern-ai-content": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/detect-deepfake-youtube": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
       "/ws": {
         target: "ws://127.0.0.1:8000",
         ws: true,

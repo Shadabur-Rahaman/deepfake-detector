@@ -40,15 +40,19 @@ export function ResponsiveVideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    setIsLoading(true);
+    video.src = src;
+    video.load();
+
+    const hideLoading = () => {
+      setIsLoading(false);
+      setDuration(Number.isFinite(video.duration) ? video.duration : 0);
+      onLoadedData?.();
+    };
+
     const handleLoadStart = () => {
       setIsLoading(true);
       onLoadStart?.();
-    };
-
-    const handleLoadedData = () => {
-      setIsLoading(false);
-      setDuration(video.duration);
-      onLoadedData?.();
     };
 
     const handleError = (e: any) => {
@@ -78,8 +82,12 @@ export function ResponsiveVideoPlayer({
       setIsFullscreen(!!document.fullscreenElement);
     };
 
+    const timeout = window.setTimeout(() => setIsLoading(false), 8000);
+
     video.addEventListener('loadstart', handleLoadStart);
-    video.addEventListener('loadeddata', handleLoadedData);
+    video.addEventListener('loadeddata', hideLoading);
+    video.addEventListener('loadedmetadata', hideLoading);
+    video.addEventListener('canplay', hideLoading);
     video.addEventListener('error', handleError);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('play', handlePlay);
@@ -88,8 +96,11 @@ export function ResponsiveVideoPlayer({
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
     return () => {
+      window.clearTimeout(timeout);
       video.removeEventListener('loadstart', handleLoadStart);
-      video.removeEventListener('loadeddata', handleLoadedData);
+      video.removeEventListener('loadeddata', hideLoading);
+      video.removeEventListener('loadedmetadata', hideLoading);
+      video.removeEventListener('canplay', hideLoading);
       video.removeEventListener('error', handleError);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('play', handlePlay);
@@ -97,7 +108,7 @@ export function ResponsiveVideoPlayer({
       video.removeEventListener('volumechange', handleVolumeChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
-  }, [onLoadStart, onLoadedData, onError]);
+  }, [src, onLoadStart, onLoadedData, onError]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -153,6 +164,7 @@ export function ResponsiveVideoPlayer({
         {/* Video Element */}
         <video
           ref={videoRef}
+          src={src}
           className="h-full w-full object-cover"
           controls={!controls ? false : undefined}
           autoPlay={autoPlay}
@@ -161,12 +173,7 @@ export function ResponsiveVideoPlayer({
           poster={poster}
           preload="metadata"
           playsInline
-        >
-          <source src={src} type="video/mp4" />
-          <source src={src} type="video/webm" />
-          <source src={src} type="video/ogg" />
-          Your browser does not support the video tag.
-        </video>
+        />
         
         {/* Sophisticated Loading Overlay */}
         {isLoading && (

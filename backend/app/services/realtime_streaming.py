@@ -124,9 +124,7 @@ class RealTimeDeepfakeProcessor:
                     break
 
                 logger.debug("[RealTimeDeepfakeProcessor] Processing frame...")
-                # Here you would call your actual deepfake detection logic
-                # For demonstration, we'll simulate detection
-                detection_result = await self._simulate_detection(frame)
+                detection_result = await self._analyze_frame(frame)
                 logger.debug(f"[RealTimeDeepfakeProcessor] Frame processed, result: {detection_result.get('is_deepfake')}")
                 # In a real scenario, send this result back via WebRTC or WebSocket
                 # await self.streamer.send_result(detection_result) # If streamer is integrated here
@@ -139,17 +137,36 @@ class RealTimeDeepfakeProcessor:
                 self.frame_queue.task_done()
         logger.info("[RealTimeDeepfakeProcessor] Exiting processing loop.")
 
-    async def _simulate_detection(self, frame: np.ndarray) -> Dict:
-        """Simulates calling the deepfake detector."""
-        await asyncio.sleep(0.05) # Simulate detection time
-        is_deepfake = np.random.rand() > 0.5
-        confidence = np.random.rand() * 100
+    async def _analyze_frame(self, frame: np.ndarray) -> Dict:
+        """Score a live frame with real visual signals (and CNN if loaded)."""
+        p_fake = 0.5
+        model_used = "visual_signals"
+        try:
+            from .signal_features import score_face
+            p_fake = float(score_face(frame).get("p_fake", 0.5))
+        except Exception as e:
+            logger.warning(f"signal_features failed: {e}")
+        try:
+            from .deepfake_detector import get_detector
+            detector = get_detector()
+            if detector and getattr(detector, "efficientnet_model", None) is not None:
+                pred, conf = await detector.predict_single_frame(frame) if hasattr(detector, "predict_single_frame") else (None, None)
+                if pred is not None and conf is not None:
+                    conf_f = float(conf)
+                    if conf_f > 1.0:
+                        conf_f = conf_f / 100.0
+                    cnn = conf_f if "deepfake" in str(pred).lower() or "fake" in str(pred).lower() else 1.0 - conf_f
+                    p_fake = 0.5 * p_fake + 0.5 * cnn
+                    model_used = "visual_signals+cnn"
+        except Exception as e:
+            logger.debug(f"CNN live frame skipped: {e}")
+        is_deepfake = p_fake > 0.5
         return {
             "timestamp": asyncio.get_event_loop().time(),
             "is_deepfake": is_deepfake,
-            "confidence": float(confidence),
+            "confidence": float(p_fake * 100.0),
             "status": "detected" if is_deepfake else "authentic",
-            "model_used": "SimulatedEnsemble"
+            "model_used": model_used,
         }
 
 class RealTimeStreamingDetector:

@@ -451,15 +451,6 @@ export const AdvancedSignInForm: React.FC<AdvancedSignInFormProps> = ({
                   </Button>
                 )}
 
-                {/* Demo Credentials */}
-                <div className="text-center text-sm text-muted-foreground space-y-2">
-                  <p className="font-medium">Demo Credentials:</p>
-                  <div className="space-y-1">
-                    <p><strong>Admin:</strong> admin@ifake.com / Admin123!@#</p>
-                    <p><strong>User:</strong> demo@ifake.com / Demo123!@#</p>
-                  </div>
-                </div>
-
                 {/* Sign Up Link */}
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground">

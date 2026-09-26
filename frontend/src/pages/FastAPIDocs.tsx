@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -37,15 +37,30 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useNavigation } from '@/contexts/NavigationContext';
+import { API_CONFIG } from '@/config/api';
 
 const FastAPIDocs: React.FC = () => {
   const [selectedEndpoint, setSelectedEndpoint] = useState(0);
   const { setLastApiDocsSection } = useNavigation();
 
+  const apiBase = useMemo(() => {
+    if (API_CONFIG.BASE_URL) return API_CONFIG.BASE_URL;
+    if (typeof window !== 'undefined') return window.location.origin;
+    return '';
+  }, []);
+
+  const wsBase = useMemo(() => {
+    if (API_CONFIG.WS_URL) return API_CONFIG.WS_URL;
+    if (typeof window !== 'undefined') {
+      return (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host;
+    }
+    return 'ws://127.0.0.1:8000';
+  }, []);
+
   const endpoints = [
     {
       method: 'POST',
-      path: '/detect-modern-ai-content',
+      path: '/v1/detect',
       title: 'File Upload Analysis',
       description: 'Submit media files for advanced MesoNet CNN deepfake analysis',
       parameters: [
@@ -60,7 +75,7 @@ const FastAPIDocs: React.FC = () => {
     },
     {
       method: 'POST',
-      path: '/detect-deepfake-youtube',
+      path: '/v1/detect/youtube',
       title: 'YouTube URL Analysis',
       description: 'Analyze YouTube videos directly by URL using MesoNet CNN pipeline',
       parameters: [
@@ -75,7 +90,7 @@ const FastAPIDocs: React.FC = () => {
     },
     {
       method: 'GET',
-      path: '/detection-status/{job_id}',
+      path: '/v1/jobs/{job_id}',
       title: 'Job Status Check',
       description: 'Monitor real-time processing status and progress of analysis jobs',
       parameters: [
@@ -105,7 +120,7 @@ const FastAPIDocs: React.FC = () => {
     swagger: {
       title: 'Swagger UI',
       description: 'Interactive API documentation with live testing capabilities',
-      url: 'http://127.0.0.1:8000/docs',
+      url: '/docs',
       features: [
         'Try out API endpoints directly in the browser',
         'View request/response schemas',
@@ -116,7 +131,7 @@ const FastAPIDocs: React.FC = () => {
     redoc: {
       title: 'ReDoc',
       description: 'Beautiful, responsive API documentation with search',
-      url: 'http://127.0.0.1:8000/redoc',
+      url: '/redoc',
       features: [
         'Clean, readable documentation format',
         'Advanced search functionality',
@@ -127,7 +142,7 @@ const FastAPIDocs: React.FC = () => {
     openapi: {
       title: 'OpenAPI Specification',
       description: 'Machine-readable API specification in JSON format',
-      url: 'http://127.0.0.1:8000/openapi.json',
+      url: '/openapi.json',
       features: [
         'Complete API specification',
         'Code generation support',
@@ -141,10 +156,12 @@ const FastAPIDocs: React.FC = () => {
     python: `# Python client example
 import requests
 import time
+import os
 
-# Initialize client
-base_url = "http://127.0.0.1:8000"
-api_key = "your_api_key_here"
+# Initialize client — defaults to localhost for CLI usage.
+# Override with IFAKE_API_URL env var for production deployments.
+base_url = os.environ.get("IFAKE_API_URL", "http://127.0.0.1:8000").rstrip("/")
+api_key = os.environ.get("IFAKE_API_KEY", "your_api_key_here")
 
 # File upload analysis
 def analyze_file(file_path):
@@ -224,10 +241,18 @@ try:
 except Exception as e:
     print(f"Error: {e}")`,
 
-    javascript: `// JavaScript client example
+    javascript: `// JavaScript client example — works same-origin by default
+//   Use inside the iFake website:     new iFakeAPIClient()          // auto: window.location.origin
+//   Use from a separate frontend:      new iFakeAPIClient('https://api.ifake.ai', 'key')
 class iFakeAPIClient {
-  constructor(baseUrl = 'http://127.0.0.1:8000', apiKey) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl, apiKey) {
+    if (baseUrl) {
+      this.baseUrl = baseUrl.replace(/\\/$/, '');
+    } else if (typeof window !== 'undefined') {
+      this.baseUrl = window.location.origin;      // same-origin default (no CORS needed)
+    } else {
+      this.baseUrl = 'http://127.0.0.1:8000';     // Node.js / CLI fallback
+    }
     this.apiKey = apiKey;
   }
 
@@ -235,7 +260,7 @@ class iFakeAPIClient {
     const url = \`\${this.baseUrl}\${endpoint}\`;
     const config = {
       headers: {
-        'Authorization': \`Bearer \${this.apiKey}\`,
+        ...(this.apiKey ? { 'Authorization': \`Bearer \${this.apiKey}\` } : {}),
         ...options.headers
       },
       ...options
@@ -294,8 +319,8 @@ class iFakeAPIClient {
   }
 }
 
-// Usage example
-const client = new iFakeAPIClient('http://127.0.0.1:8000', 'your_api_key_here');
+// Usage example (inside the iFake website — same-origin, zero CORS)
+const client = new iFakeAPIClient();  // no args needed
 
 async function analyzeVideo() {
   try {
@@ -320,10 +345,13 @@ async function analyzeVideo() {
   }
 }`,
 
-    curl: `# cURL examples for all endpoints
+    curl: `# cURL examples for all endpoints (adjust $BASE to your deployment)
+#   Local:  export BASE="http://127.0.0.1:8000"
+#   Prod:   export BASE="https://ifake.ai"
+BASE="http://127.0.0.1:8000"
 
 # 1. File Upload Analysis
-curl -X POST "http://127.0.0.1:8000/detect-modern-ai-content" \\
+curl -X POST "\${BASE}/detect-modern-ai-content" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -F "file=@video.mp4" \\
   -F "enhanced=true"
@@ -336,7 +364,7 @@ curl -X POST "http://127.0.0.1:8000/detect-modern-ai-content" \\
 # }
 
 # 2. YouTube URL Analysis
-curl -X POST "http://127.0.0.1:8000/detect-deepfake-youtube" \\
+curl -X POST "\${BASE}/detect-deepfake-youtube" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -352,7 +380,7 @@ curl -X POST "http://127.0.0.1:8000/detect-deepfake-youtube" \\
 # }
 
 # 3. Check Job Status
-curl -X GET "http://127.0.0.1:8000/detection-status/abc123def456" \\
+curl -X GET "\${BASE}/detection-status/abc123def456" \\
   -H "Authorization: Bearer YOUR_API_KEY"
 
 # Response (Processing):
@@ -459,13 +487,13 @@ curl -X GET "http://127.0.0.1:8000/detection-status/abc123def456" \\
             </p>
             <div className="flex flex-wrap gap-4 justify-center mb-12">
               <Button className="neural-button" asChild>
-                <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener noreferrer">
+                <a href="/docs" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Open Swagger UI
                 </a>
               </Button>
               <Button variant="outline" className="neural-card neural-button" asChild>
-                <a href="http://127.0.0.1:8000/redoc" target="_blank" rel="noopener noreferrer">
+                <a href="/redoc" target="_blank" rel="noopener noreferrer">
                   <BookOpen className="w-4 h-4 mr-2" />
                   View ReDoc
                 </a>
@@ -754,7 +782,7 @@ curl -X GET "http://127.0.0.1:8000/detection-status/abc123def456" \\
                 </Link>
               </Button>
               <Button size="lg" className="neural-button" asChild>
-                <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noopener noreferrer">
+                <a href="/docs" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="w-4 h-4 mr-2" />
                   Open Swagger UI
                 </a>

@@ -238,8 +238,8 @@ export const mockBackend = {
       enabled: mockData.systemSettings.emailNotifications,
       smtpHost: 'smtp.example.com',
       smtpPort: 587,
-      fromEmail: 'admin@ifake.com',
-      fromName: 'iFake Admin'
+      fromEmail: 'noreply@ifake.ai',
+      fromName: 'iFake Team'
     };
   },
 

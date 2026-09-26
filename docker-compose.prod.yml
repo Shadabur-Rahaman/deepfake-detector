@@ -1,0 +1,38 @@
+# Production stack: API + UI behind nginx
+#   copy config.env.example config.env
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+
+services:
+  backend:
+    environment:
+      FORCE_CPU_MODE: ${FORCE_CPU_MODE:-1}
+      DEVELOPMENT_MODE: "false"
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-2}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  frontend:
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

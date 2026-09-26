@@ -707,21 +707,23 @@ class AdvancedAIModels:
     async def _analyze_with_llava(self, image_data: str, analysis_type: str) -> Dict[str, Any]:
         """Analyze image using LLaVA (Local Large Language and Vision Assistant)"""
         try:
-            # This would integrate with a local LLaVA model
-            # For now, we'll simulate the analysis
-            await asyncio.sleep(0.1)  # Simulate processing time
-            
-            # Simulate LLaVA analysis
-            confidence = np.random.uniform(0.6, 0.9)
-            prediction = "real" if confidence < 0.7 else "deepfake"
-            
+            from .signal_features import score_face
+            import base64
+            raw = base64.b64decode(image_data.split(",")[-1] if isinstance(image_data, str) else image_data)
+            arr = np.frombuffer(raw, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                return {"error": "invalid_image", "model": "llava", "available": False}
+            scored = score_face(img)
+            p = float(scored["p_fake"])
             return {
-                'model': 'llava',
-                'prediction': prediction,
-                'confidence': confidence,
-                'reasoning': 'LLaVA multimodal analysis suggests this content may be synthetic',
-                'artifacts_detected': ['texture_inconsistency', 'lighting_anomaly'],
-                'timestamp': time.time()
+                "model": "visual_signals",
+                "prediction": "deepfake" if p >= 0.5 else "real",
+                "confidence": p if p >= 0.5 else 1.0 - p,
+                "reasoning": "Frequency/blur/symmetry statistics (LLaVA is not bundled)",
+                "artifacts_detected": ["high_frequency"] if scored["hf"] > 0.55 else [],
+                "timestamp": time.time(),
+                "available": True,
             }
             
         except Exception as e:
@@ -731,21 +733,22 @@ class AdvancedAIModels:
     async def _detect_dalle3_artifacts(self, image_data: str) -> Dict[str, Any]:
         """Detect DALL-E 3 specific artifacts"""
         try:
-            # This would use specialized models trained on DALL-E 3 outputs
-            # For now, we'll simulate the detection
-            
-            await asyncio.sleep(0.05)  # Simulate processing time
-            
-            # Simulate DALL-E 3 detection
-            dalle3_confidence = np.random.uniform(0.3, 0.8)
-            is_dalle3 = dalle3_confidence > 0.6
-            
+            from .signal_features import score_face
+            import base64
+            raw = base64.b64decode(image_data.split(",")[-1] if isinstance(image_data, str) else image_data)
+            arr = np.frombuffer(raw, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                return {"error": "invalid_image", "model": "dalle3_detection", "available": False}
+            scored = score_face(img)
+            p = float(scored["p_fake"])
+            is_dalle3 = p > 0.65 and scored.get("entropy", 0.5) < 0.45
             return {
-                'model': 'dalle3_detection',
-                'is_dalle3_generated': is_dalle3,
-                'confidence': dalle3_confidence,
-                'artifacts': ['dalle3_style_artifacts', 'composition_patterns'] if is_dalle3 else [],
-                'timestamp': time.time()
+                "model": "visual_signals",
+                "is_dalle3_generated": bool(is_dalle3),
+                "confidence": p,
+                "artifacts": ["low_entropy_smooth_texture"] if is_dalle3 else [],
+                "timestamp": time.time(),
             }
             
         except Exception as e:

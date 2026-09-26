@@ -638,6 +638,12 @@ class EnhancedModelLoader:
     def load_model(self, model_name: str) -> Optional[torch.nn.Module]:
         """Load a specific model by name with CUDA memory management and lazy loading"""
         try:
+            if self.gpu_model_limit is None:
+                self.gpu_model_limit = 0
+            if self.gpu_models_loaded is None:
+                self.gpu_models_loaded = 0
+            if self.gpu_memory_gb is None:
+                self.gpu_memory_gb = 0.0
             if model_name not in self.model_configs:
                 logger.error(f"Unknown model: {model_name}")
                 return None
@@ -941,70 +947,16 @@ class EnhancedModelLoader:
                 return None
             else:
                 logger.error(f"Failed to load model {model_name}: {e}")
-                # Create fallback model
-                logger.info(f"Creating fallback model for {model_name}")
                 return self._create_fallback_model(model_name, config)
         except Exception as e:
             logger.error(f"Failed to load model {model_name}: {e}")
-            # Create fallback model
-            logger.info(f"Creating fallback model for {model_name}")
-            return self._create_fallback_model(model_name, config)
+            logger.warning(f"Skipping {model_name} instead of using a random untrained network")
+            return None
     
     def _create_fallback_model(self, model_name: str, config: Dict) -> Optional[torch.nn.Module]:
-        """Create a fallback model when the original model file is missing"""
-        try:
-            # ✅ FIX: Handle None config
-            if config is None:
-                config = {"type": "efficientnet", "weight": 0.1}
-            logger.info(f"Creating fallback EfficientNet model for {model_name}")
-            
-            # Create a simple EfficientNet-B0 model as fallback
-            model = models.efficientnet_b0(weights=None)
-            
-            # Rebuild classifier for binary classification
-            in_features = model.classifier[1].in_features
-            model.classifier = nn.Sequential(
-                nn.Dropout(p=0.2, inplace=True),
-                nn.Linear(in_features, 2)
-            )
-            
-            # Initialize weights randomly (since we don't have pretrained weights)
-            self._initialize_weights(model)
-            
-            # ✅ CUDA MEMORY FIX: Add memory management before moving model to device
-            try:
-                # Clear CUDA cache before loading model to device
-                self._clear_cuda_cache()
-                
-                # ✅ CRITICAL FIX: Ensure model is moved to device and stays there
-                model = model.to(self.device)
-                # Verify model is actually on the correct device
-                model_device = next(model.parameters()).device
-                if model_device != self.device:
-                    logger.debug(f"Model device mismatch: expected {self.device}, got {model_device} (this is expected for CPU-loaded models)")
-                    # Don't force move - model is already on correct device (CPU or GPU based on memory)
-                model.eval()
-                
-                # Clear cache again after loading
-                self._clear_cuda_cache()
-                
-            except RuntimeError as e:
-                if "CUDA" in str(e) or "memory" in str(e).lower():
-                    logger.warning(f"CUDA memory error loading model: {e}")
-                    logger.warning("Falling back to CPU for this model")
-                    # Clear cache and try CPU
-                    self._clear_cuda_cache()
-                    model = model.to(torch.device("cpu"))
-                    model.eval()
-                else:
-                    raise e
-            
-            logger.info(f"✅ Fallback model created for {model_name}")
-            return model
-            
-        except Exception as e:
-            logger.error(f"Failed to create fallback model for {model_name}: {e}")
-            return None
+        """Do not invent untrained weights — skip the model."""
+        logger.warning(f"No usable weights for {model_name}; skipping (no random fallback)")
+        return None
     
     def _initialize_weights(self, model: torch.nn.Module):
         """Initialize model weights"""
@@ -1339,7 +1291,7 @@ class EnhancedModelLoader:
             # ✅ FIX: Rebuild classifier if dimensions don't match
             expected_num_classes = 2  # Binary classification: Real vs Fake
             
-            if old_num_classes != expected_num_classes:
+            if old_num_classes is not None and old_num_classes != expected_num_classes:
                 logger.debug(f"Rebuilding classifier: {old_num_classes} → {expected_num_classes}")
                 
                 # Get input features dimension

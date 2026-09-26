@@ -296,14 +296,24 @@ function TryItContent() {
         formDataWithMode.append('file', file)
         formDataWithMode.append('detection_mode', selectedMode)
         
-        res = await fetch(`${API_BASE_URL}/api/detect-deepfake-upload-mode`, {
+        res = await fetch(`${API_BASE_URL}/v1/detect`, {
           method: 'POST',
           body: formDataWithMode,
+          headers: (() => {
+            const t = localStorage.getItem('ifake_access_token')
+            return t ? { Authorization: `Bearer ${t}` } : undefined
+          })(),
         })
       } else if (uploadMethod === 'url' && youtubeUrl) {
-        res = await fetch(`${API_BASE_URL}/api/detect-deepfake-youtube`, {
+        res = await fetch(`${API_BASE_URL}/v1/detect/youtube`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(() => {
+              const t = localStorage.getItem('ifake_access_token')
+              return t ? { Authorization: `Bearer ${t}` } : {}
+            })(),
+          },
           body: JSON.stringify({ 
             url: youtubeUrl,
             detection_mode: selectedMode
@@ -360,14 +370,18 @@ function TryItContent() {
         pollInterval = Math.min(pollInterval * 1.15, 5000) // Gentler increase, max 5 seconds
       }
       try {
-        // Try direct status endpoint first (uses DETECTION_RESULTS dictionary)
-        let endpoint = `http://127.0.0.1:8000/detection-status/${videoId}`
-        let statusRes = await fetch(endpoint)
-        
-        // If direct endpoint fails, try mode detection endpoint as fallback
+        const token = localStorage.getItem('ifake_access_token')
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined
+        let endpoint = `${API_BASE_URL}/v1/jobs/${videoId}`
+        let statusRes = await fetch(endpoint, { headers: authHeaders })
+
         if (!statusRes.ok) {
-          endpoint = `${API_BASE_URL}/mode-detection/detection-status/${videoId}`
-          statusRes = await fetch(endpoint)
+          endpoint = `${API_BASE_URL}/api/detection-status/${videoId}`
+          statusRes = await fetch(endpoint, { headers: authHeaders })
+        }
+        if (!statusRes.ok) {
+          endpoint = `${API_BASE_URL}/detection-status/${videoId}`
+          statusRes = await fetch(endpoint, { headers: authHeaders })
         }
         
         if (!statusRes.ok) {

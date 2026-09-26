@@ -296,21 +296,6 @@ class EnhancedDatabaseConfig:
                 )
             ''')
             
-            # Insert default users
-            import hashlib
-            admin_password = hashlib.sha256("Admin123!@#".encode()).hexdigest()
-            demo_password = hashlib.sha256("Demo123!@#".encode()).hexdigest()
-            
-            cursor.execute('''
-                INSERT OR IGNORE INTO users (id, email, username, password_hash, full_name, is_active, is_verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', ("admin_001", "admin@ifake.com", "admin", admin_password, "System Administrator", 1, 1))
-            
-            cursor.execute('''
-                INSERT OR IGNORE INTO users (id, email, username, password_hash, full_name, is_active, is_verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', ("demo_001", "demo@ifake.com", "demo", demo_password, "Demo User", 1, 1))
-            
             conn.commit()
             conn.close()
             

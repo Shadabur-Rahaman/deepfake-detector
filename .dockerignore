@@ -1,0 +1,51 @@
+# .dockerignore — keep production image slim and build fast.
+# Equivalent to .gitignore, but applied to the Docker build context.
+
+# Git / CI / local state
+.git
+.gitignore
+.github
+.trae
+.vscode
+.idea
+*.swp
+*.swo
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtualenvs and local installs on the host build machine
+venv/
+.venv/
+env/
+ENV/
+node_modules/
+
+# Node build artifacts (these are built in the frontend-build *stage*, not
+# copied from the host.  Keeping them out of the context is faster and
+# avoids accidental host-bitness mismatch)
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+
+# Runtime output — uploads, downloaded videos, ML caches
+uploaded_videos/
+downloaded_videos/
+ml_artifacts/**/*.pt.bak
+ml_artifacts/**/*.pth.bak
+runtime/
+
+# Local env / logs
+config.env
+.env
+.env.*
+!.env.example
+logs/
+*.log
+debug/
+
+# OS
+.DS_Store
+Thumbs.db

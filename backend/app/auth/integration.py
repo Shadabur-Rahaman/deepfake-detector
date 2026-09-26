@@ -89,9 +89,6 @@ class AuthIntegration:
             # Setup routes
             await self._setup_routes()
             
-            # Initialize default data
-            await self._initialize_default_data()
-            
             self.is_initialized = True
             # Reduced logging to avoid duplicates
             
@@ -359,11 +356,6 @@ class AuthIntegration:
                             # Get user roles
                             user_roles_list = [role.name for role in user.roles] if user.roles else ["user"]
                             
-                            # Special case: if user is admin@ifake.com, ensure they have admin role
-                            if user.email == "admin@ifake.com" and "admin" not in user_roles_list:
-                                user_roles_list = ["admin", "user"]
-                                logger.info(f"🔑 Admin user detected by email, adding admin role: {user_roles_list}")
-                            
                             # Get user permissions
                             user_permissions_list = user.permissions if hasattr(user, 'permissions') else []
                             
@@ -450,55 +442,8 @@ class AuthIntegration:
             raise
     
     async def _initialize_default_data(self) -> None:
-        """Initialize default users and roles"""
-        try:
-            # Check if admin user exists
-            admin_user = self.db_config.get_session().query(User).filter(User.email == "admin@ifake.com").first()
-            
-            if not admin_user:
-                # Create admin user
-                admin_result = await self.auth_core.create_user(
-                    email="admin@ifake.com",
-                    username="admin",
-                    password="Admin123!@#",
-                    full_name="System Administrator",
-                    ip_address="127.0.0.1"
-                )
-                
-                if admin_result.success:
-                    # Verify admin user
-                    admin_user = self.db_config.get_session().query(User).filter(User.id == admin_result.user_id).first()
-                    if admin_user:
-                        admin_user.is_verified = True
-                        admin_user.status = "active"
-                        self.db_config.get_session().commit()
-                        logger.info("[OK] Default admin user created successfully")
-            
-            # Check if demo user exists
-            demo_user = self.db_config.get_session().query(User).filter(User.email == "demo@ifake.com").first()
-            
-            if not demo_user:
-                # Create demo user
-                demo_result = await self.auth_core.create_user(
-                    email="demo@ifake.com",
-                    username="demo",
-                    password="Demo123!@#",
-                    full_name="Demo User",
-                    ip_address="127.0.0.1"
-                )
-                
-                if demo_result.success:
-                    # Verify demo user
-                    demo_user = self.db_config.get_session().query(User).filter(User.id == demo_result.user_id).first()
-                    if demo_user:
-                        demo_user.is_verified = True
-                        demo_user.status = "active"
-                        self.db_config.get_session().commit()
-                        logger.info("[OK] Default demo user created successfully")
-            
-        except Exception as e:
-            logger.warning(f"[WARNING] Default data initialization failed: {str(e)}")
-            # Continue without default data for production
+        """Initialize default users and roles (production: no hardcoded users)"""
+        return
 
 # Dependency functions
 async def get_db(request: Request) -> Session:

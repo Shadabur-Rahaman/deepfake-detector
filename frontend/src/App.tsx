@@ -27,7 +27,8 @@ import Blog from "./pages/Blog";
 import Contact from "./pages/Contact";
 import TryIt from "./pages/TryIt";
 import AdminDashboard from "./pages/AdminDashboard";
-import AuthTest from "./pages/AuthTest";
+import SignIn from "./pages/SignIn";
+import Account from "./pages/Account";
 import NotFound from "./pages/NotFound";
 
 // Resource Pages
@@ -92,8 +93,9 @@ function App() {
                             <Route path="/detection" element={<PageLayout><Detection /></PageLayout>} />
                             {/* <Route path="/super-advanced" element={<PageLayout><SuperAdvancedDetection /></PageLayout>} /> */}
                             <Route path="/admin" element={<AdminDashboard />} />
-                            <Route path="/admin/legacy" element={<AdminDashboard />} />
-                            <Route path="/auth-test" element={<PageLayout><AuthTest /></PageLayout>} />
+                            <Route path="/signin" element={<PageLayout><SignIn /></PageLayout>} />
+                            <Route path="/login" element={<PageLayout><SignIn /></PageLayout>} />
+                            <Route path="/account" element={<PageLayout><Account /></PageLayout>} />
                             <Route path="/features" element={<PageLayout><Features /></PageLayout>} />
                             <Route path="/api" element={<PageLayout><ApiDocs /></PageLayout>} />
                             <Route path="/blog" element={<PageLayout><Blog /></PageLayout>} />

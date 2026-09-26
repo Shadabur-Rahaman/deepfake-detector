@@ -707,8 +707,14 @@ class DeepfakeDetector:
         if YOLO_AVAILABLE:
             try:
                 from ultralytics import YOLO
-                model = YOLO('yolov8n-face.pt')
-                return model
+                for weights in ('yolov8n-face.pt', 'yolov8n.pt'):
+                    try:
+                        model = YOLO(weights)
+                        logger.info(f"YOLO loader using {weights}")
+                        return model
+                    except Exception as weight_err:
+                        logger.warning(f"YOLO weights {weights} unavailable: {weight_err}")
+                return None
             except Exception as e:
                 logger.error(f"YOLO loader failed: {e}")
         return None
@@ -1807,6 +1813,9 @@ def detect_faces_yolo_sync(frame: np.ndarray) -> List[np.ndarray]:
 def validate_cuda_setup():
     """Validate CUDA setup and model loading"""
     try:
+        if os.getenv("FORCE_CPU_MODE", "").lower() in ("1", "true", "yes", "on"):
+            logger.info("Skipping CUDA validation (FORCE_CPU_MODE)")
+            return True
         logger.info("Validating CUDA setup...")
         
         # ✅ CUDA MEMORY FIX: Clear cache before validation
@@ -1877,9 +1886,10 @@ def validate_cuda_setup():
             
             # Test inference with proper error handling
             try:
-                test_tensor = torch.randn(1, 3, 224, 224).to(device)
                 with torch.no_grad():
                     if detector.efficientnet_model is not None:
+                        model_device = next(detector.efficientnet_model.parameters()).device
+                        test_tensor = torch.randn(1, 3, 224, 224, device=model_device)
                         output = detector.efficientnet_model(test_tensor)
                         logger.info(f"Test inference successful: {output.shape}")
                         

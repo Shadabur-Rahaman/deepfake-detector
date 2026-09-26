@@ -1,279 +1,286 @@
-// Simple JavaScript Authentication Service
+const TOKEN_KEY = "ifake_access_token";
+const REFRESH_KEY = "ifake_refresh_token";
+const USER_KEY = "ifake_current_user";
+
+function apiBase() {
+  return import.meta.env.VITE_API_URL ?? "";
+}
+
 class AuthService {
   constructor() {
-    this.users = this.loadUsers();
     this.currentUser = this.getCurrentUser();
   }
 
-  // Load users from localStorage
-  loadUsers() {
-    const users = localStorage.getItem('ifake_users');
-    const defaultUsers = users ? JSON.parse(users) : [];
-    
-    // Check if admin user exists, if not create it
-    const adminExists = defaultUsers.find(user => user.email === 'admin@ifake.com');
-    if (!adminExists) {
-      const adminUser = {
-        id: 'admin_001',
-        email: 'admin@ifake.com',
-        password: 'Admin123!@#',
-        fullName: 'System Administrator',
-        username: 'admin',
-        roles: ['admin'],
-        permissions: ['detection:create', 'detection:read', 'detection:update', 'detection:delete', 'try:access', 'admin:access', 'user:manage', 'system:manage'],
-        createdAt: new Date().toISOString(),
-        isActive: true
-      };
-      defaultUsers.push(adminUser);
-    }
-    
-    // Check if demo user exists, if not create it
-    const demoExists = defaultUsers.find(user => user.email === 'demo@ifake.com');
-    if (!demoExists) {
-      const demoUser = {
-        id: 'demo_001',
-        email: 'demo@ifake.com',
-        password: 'Demo123!@#',
-        fullName: 'Demo User',
-        username: 'demo',
-        roles: ['user'],
-        permissions: ['try:access', 'detection:create'],
-        createdAt: new Date().toISOString(),
-        isActive: true
-      };
-      defaultUsers.push(demoUser);
-    }
-    
-    if (!adminExists || !demoExists) {
-      localStorage.setItem('ifake_users', JSON.stringify(defaultUsers));
-    }
-    
-    return defaultUsers;
-  }
-
-  // Save users to localStorage
-  saveUsers() {
-    localStorage.setItem('ifake_users', JSON.stringify(this.users));
-  }
-
-  // Get current user from localStorage
   getCurrentUser() {
-    const user = localStorage.getItem('ifake_current_user');
-    return user ? JSON.parse(user) : null;
-  }
-
-  // Set current user in localStorage
-  setCurrentUser(user) {
-    if (user) {
-      localStorage.setItem('ifake_current_user', JSON.stringify(user));
-    } else {
-      localStorage.removeItem('ifake_current_user');
+    try {
+      const raw = localStorage.getItem(USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
     }
-    this.currentUser = user;
   }
 
-  // Check if user is authenticated
+  setSession({ user, access_token, refresh_token }) {
+    if (access_token) localStorage.setItem(TOKEN_KEY, access_token);
+    if (refresh_token) localStorage.setItem(REFRESH_KEY, refresh_token);
+    if (user) {
+      const normalized = {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        fullName: user.full_name || user.fullName,
+        full_name: user.full_name || user.fullName,
+        roles: user.roles || ["user"],
+        permissions: user.permissions || [],
+      };
+      localStorage.setItem(USER_KEY, JSON.stringify(normalized));
+      this.currentUser = normalized;
+    }
+  }
+
+  clearSession() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(USER_KEY);
+    this.currentUser = null;
+  }
+
+  accessToken() {
+    return localStorage.getItem(TOKEN_KEY);
+  }
+
+  authHeaders() {
+    const token = this.accessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async request(path, options = {}) {
+    const headers = {
+      "Content-Type": "application/json",
+      ...this.authHeaders(),
+      ...(options.headers || {}),
+    };
+    const paths =
+      path.startsWith("/v1/auth")
+        ? [path, path.replace("/v1/auth", "/api/auth")]
+        : path.startsWith("/api/auth")
+          ? [path, path.replace("/api/auth", "/v1/auth")]
+          : [path];
+    let lastErr = null;
+    for (const p of paths) {
+      const res = await fetch(`${apiBase()}${p}`, { ...options, headers });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = {};
+      }
+      if (res.status === 404 && paths.length > 1 && p !== paths[paths.length - 1]) {
+        continue;
+      }
+      if (!res.ok) {
+        const detail = data.detail;
+        const message =
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d) => d.msg || d).join(", ")
+              : data.message || `Request failed (${res.status})`;
+        lastErr = new Error(message);
+        lastErr.status = res.status;
+        if (res.status === 404 && p !== paths[paths.length - 1]) continue;
+        throw lastErr;
+      }
+      return data;
+    }
+    throw lastErr || new Error("Request failed");
+  }
+
   isAuthenticated() {
-    return this.currentUser !== null;
+    return Boolean(this.accessToken() && this.currentUser);
   }
 
-  // Register new user
-  register(userData) {
-    return new Promise((resolve, reject) => {
-      try {
-        // Validate input
-        if (!userData.email || !userData.password || !userData.fullName) {
-          throw new Error('All fields are required');
-        }
-
-        // Check if user already exists
-        const existingUser = this.users.find(user => user.email === userData.email);
-        if (existingUser) {
-          throw new Error('User with this email already exists');
-        }
-
-        // Create new user
-        const newUser = {
-          id: Date.now().toString(),
-          email: userData.email,
-          password: userData.password, // In real app, this should be hashed
-          fullName: userData.fullName,
-          username: userData.username || userData.email.split('@')[0],
-          createdAt: new Date().toISOString(),
-          isActive: true
-        };
-
-        // Add to users array
-        this.users.push(newUser);
-        this.saveUsers();
-
-        resolve({
-          success: true,
-          message: 'User registered successfully',
-          user: {
-            id: newUser.id,
-            email: newUser.email,
-            fullName: newUser.fullName,
-            username: newUser.username
-          }
-        });
-      } catch (error) {
-        reject({
-          success: false,
-          message: error.message
-        });
-      }
-    });
-  }
-
-  // Login user
-  login(email, password) {
-    return new Promise((resolve, reject) => {
-      try {
-        // Find user by email
-        const user = this.users.find(u => u.email === email);
-        
-        if (!user) {
-          throw new Error('User not found');
-        }
-
-        if (user.password !== password) {
-          throw new Error('Invalid password');
-        }
-
-        if (!user.isActive) {
-          throw new Error('Account is inactive');
-        }
-
-        // Set current user
-        this.setCurrentUser({
-          id: user.id,
-          email: user.email,
-          fullName: user.fullName,
-          username: user.username,
-          roles: user.roles || [],
-          permissions: user.permissions || []
-        });
-
-        resolve({
-          success: true,
-          message: 'Login successful',
-          user: {
-            id: user.id,
-            email: user.email,
-            fullName: user.fullName,
-            username: user.username,
-            roles: user.roles || [],
-            permissions: user.permissions || []
-          }
-        });
-      } catch (error) {
-        reject({
-          success: false,
-          message: error.message
-        });
-      }
-    });
-  }
-
-  // Logout user
-  logout() {
-    this.setCurrentUser(null);
-    return Promise.resolve({
-      success: true,
-      message: 'Logged out successfully'
-    });
-  }
-
-  // Get current user info
   getCurrentUserInfo() {
     return this.currentUser;
   }
 
-  // Update user profile
-  updateProfile(updates) {
-    return new Promise((resolve, reject) => {
-      try {
-        if (!this.currentUser) {
-          throw new Error('No user logged in');
-        }
+  async authPolicy() {
+    try {
+      return await this.request("/v1/auth/policy");
+    } catch {
+      return {
+        min_length: 12,
+        max_length: 72,
+        email_ready: false,
+        sms_ready: false,
+      };
+    }
+  }
 
-        // Find user in users array
-        const userIndex = this.users.findIndex(u => u.id === this.currentUser.id);
-        if (userIndex === -1) {
-          throw new Error('User not found');
-        }
+  async register(userData) {
+    const data = await this.request("/v1/auth/register", {
+      method: "POST",
+      body: JSON.stringify({
+        email: userData.email,
+        password: userData.password,
+        full_name: userData.fullName || userData.full_name,
+        username: userData.username,
+        phone: userData.phone || null,
+      }),
+    });
+    if (data.needs_verification && data.signup_id) {
+      return { success: true, needs_verification: true, ...data };
+    }
+    if (data.access_token) {
+      throw new Error(
+        "The API still created the account without email verification. Stop the process on port 8000 and start a new uvicorn so the Gmail OTP routes load."
+      );
+    }
+    throw new Error(data.detail || data.message || "Registration did not start email verification.");
+  }
 
-        // Update user data
-        this.users[userIndex] = {
-          ...this.users[userIndex],
-          ...updates,
-          id: this.currentUser.id, // Preserve ID
-          email: this.currentUser.email // Preserve email
-        };
+  async verifyRegister({ signup_id, email_code, sms_code }) {
+    const data = await this.request("/v1/auth/register/verify", {
+      method: "POST",
+      body: JSON.stringify({ signup_id, email_code, sms_code: sms_code || null }),
+    });
+    this.setSession(data);
+    return { success: true, user: this.currentUser, message: "Email verified" };
+  }
 
-        // Update current user
-        this.currentUser = {
-          ...this.currentUser,
-          ...updates
-        };
-
-        this.saveUsers();
-        this.setCurrentUser(this.currentUser);
-
-        resolve({
-          success: true,
-          message: 'Profile updated successfully',
-          user: this.currentUser
-        });
-      } catch (error) {
-        reject({
-          success: false,
-          message: error.message
-        });
-      }
+  async resendOtp({ signup_id, channel }) {
+    return this.request("/v1/auth/register/resend", {
+      method: "POST",
+      body: JSON.stringify({ signup_id, channel }),
     });
   }
 
-  // Change password
-  changePassword(currentPassword, newPassword) {
-    return new Promise((resolve, reject) => {
-      try {
-        if (!this.currentUser) {
-          throw new Error('No user logged in');
-        }
-
-        // Find user in users array
-        const userIndex = this.users.findIndex(u => u.id === this.currentUser.id);
-        if (userIndex === -1) {
-          throw new Error('User not found');
-        }
-
-        // Verify current password
-        if (this.users[userIndex].password !== currentPassword) {
-          throw new Error('Current password is incorrect');
-        }
-
-        // Update password
-        this.users[userIndex].password = newPassword;
-        this.saveUsers();
-
-        resolve({
-          success: true,
-          message: 'Password changed successfully'
-        });
-      } catch (error) {
-        reject({
-          success: false,
-          message: error.message
-        });
-      }
+  async login(email, password, phone) {
+    const data = await this.request("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: email || null, phone: phone || null, password }),
     });
+    if (data.needs_verification && (data.challenge_id || data.signup_id)) {
+      return { success: true, needs_verification: true, ...data };
+    }
+    if (data.access_token) {
+      throw new Error(
+        "The API signed you in without a Gmail code. Restart uvicorn so login verification loads."
+      );
+    }
+    throw new Error(data.detail || data.message || "Sign-in did not start email verification.");
+  }
+
+  async verifyLogin({ challenge_id, signup_id, email_code, sms_code }) {
+    const data = await this.request("/v1/auth/login/verify", {
+      method: "POST",
+      body: JSON.stringify({
+        challenge_id: challenge_id || signup_id,
+        signup_id: signup_id || challenge_id,
+        email_code,
+        sms_code: sms_code || null,
+      }),
+    });
+    this.setSession(data);
+    return { success: true, user: this.currentUser, message: "Signed in" };
+  }
+
+  async resendLoginOtp({ challenge_id, signup_id, channel }) {
+    return this.request("/v1/auth/login/resend", {
+      method: "POST",
+      body: JSON.stringify({
+        challenge_id: challenge_id || signup_id,
+        signup_id: signup_id || challenge_id,
+        channel,
+      }),
+    });
+  }
+
+  async forgotPassword(email) {
+    return this.request("/v1/auth/password/forgot", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async resetPassword({ reset_id, code, new_password }) {
+    return this.request("/v1/auth/password/reset", {
+      method: "POST",
+      body: JSON.stringify({ reset_id, code, new_password }),
+    });
+  }
+
+  async refresh() {
+    const refresh_token = localStorage.getItem(REFRESH_KEY);
+    if (!refresh_token) throw new Error("No refresh token");
+    const data = await this.request("/v1/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refresh_token }),
+    });
+    this.setSession(data);
+    return data;
+  }
+
+  async restore() {
+    if (!this.accessToken()) {
+      this.clearSession();
+      return null;
+    }
+    try {
+      const user = await this.request("/v1/auth/me");
+      this.setSession({ user, access_token: this.accessToken() });
+      return this.currentUser;
+    } catch (e) {
+      if (e.status === 401) {
+        try {
+          await this.refresh();
+          return this.currentUser;
+        } catch {
+          this.clearSession();
+          return null;
+        }
+      }
+      return this.currentUser;
+    }
+  }
+
+  async logout() {
+    const refresh_token = localStorage.getItem(REFRESH_KEY);
+    try {
+      await this.request("/v1/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token }),
+      });
+    } catch {
+      /* still clear locally */
+    }
+    this.clearSession();
+    return { success: true, message: "Signed out" };
+  }
+
+  async createApiKey(name = "default") {
+    return this.request("/v1/auth/api-keys", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async listApiKeys() {
+    return this.request("/v1/auth/api-keys");
+  }
+
+  async deleteApiKey(id) {
+    return this.request(`/v1/auth/api-keys/${id}`, { method: "DELETE" });
+  }
+
+  async updateProfile() {
+    return { success: false, message: "Use the account page after re-login" };
+  }
+
+  async changePassword() {
+    return { success: false, message: "Password change is not enabled yet" };
   }
 }
 
-// Create singleton instance
 const authService = new AuthService();
-
-// Export for use in other files
 export default authService;

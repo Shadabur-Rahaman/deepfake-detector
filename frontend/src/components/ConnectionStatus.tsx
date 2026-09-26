@@ -16,7 +16,7 @@ export const ConnectionStatus: React.FC<ConnectionStatusProps> = ({ className })
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
         
-        const response = await fetch('http://127.0.0.1:8000/api/health', {
+        const response = await fetch(`${API_BASE_URL}/api/health`, {
           signal: controller.signal,
           method: 'GET'
         });

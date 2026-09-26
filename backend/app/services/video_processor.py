@@ -332,7 +332,7 @@ except ImportError:
         print("[WARNING] YOLOv8 not available")
 
 MODEL_INPUT_SIZE = (224, 224)
-YOLO_FACE_MODEL_PATH = "yolov8n-face.pt"  # path to YOLOv8 face weights
+YOLO_FACE_MODEL_PATH = "yolov8n-face.pt" if os.path.exists("yolov8n-face.pt") else "yolov8n.pt"
 
 def get_safe_device():
     """✅ ENHANCED: Get a safe device for inference with comprehensive error handling and fallback"""

@@ -1,11 +1,10 @@
 // src/components/ui/Header.tsx - Enhanced with active link highlighting
 import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useAuth } from '@/contexts/SimpleAuthContext';
-import SimpleAuthModal from '@/components/auth/SimpleAuthModal';
 import { AdminNotificationBell } from '@/components/admin/AdminNotificationBell';
 import { EnhancedNotificationBell } from '@/components/admin/EnhancedNotificationBell';
 import { User, LogOut, Menu, X, Shield } from 'lucide-react';
@@ -27,8 +26,8 @@ const adminNavigationItems = [
 
 export const Header = () => {
   const { user, isAuthenticated, logout, isLoading } = useAuth();
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
 
   return (
@@ -103,6 +102,14 @@ export const Header = () => {
                   <Button
                     variant="outline"
                     size="sm"
+                    onClick={() => navigate('/account')}
+                    className="hidden lg:flex text-xs lg:text-sm"
+                  >
+                    Account
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
                     onClick={logout}
                     className="flex items-center gap-1 lg:gap-2 text-xs lg:text-sm"
                   >
@@ -115,7 +122,7 @@ export const Header = () => {
                   <Button 
                     variant="ghost" 
                     size="sm"
-                    onClick={() => setIsAuthModalOpen(true)}
+                    onClick={() => navigate('/signin')}
                     className="hidden lg:flex text-sm"
                   >
                     Sign In
@@ -123,7 +130,7 @@ export const Header = () => {
                   <Button 
                     size="sm"
                     className="glow-primary text-xs lg:text-sm px-3 lg:px-4"
-                    onClick={() => setIsAuthModalOpen(true)}
+                    onClick={() => navigate('/signin')}
                   >
                     <span className="hidden sm:inline">Get Started</span>
                     <span className="sm:hidden">Start</span>
@@ -171,7 +178,7 @@ export const Header = () => {
                     <Button
                       variant="ghost"
                       onClick={() => {
-                        setIsAuthModalOpen(true);
+                        navigate('/signin');
                         setIsMobileMenuOpen(false);
                       }}
                       className="justify-start w-full"
@@ -195,16 +202,6 @@ export const Header = () => {
           )}
         </div>
       </header>
-
-      {/* Simple Authentication Modal */}
-      <SimpleAuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onAuthSuccess={(user) => {
-          setIsAuthModalOpen(false);
-          // User is automatically set in context
-        }}
-      />
     </>
   );
 };

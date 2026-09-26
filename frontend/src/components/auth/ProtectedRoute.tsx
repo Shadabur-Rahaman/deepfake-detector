@@ -68,7 +68,7 @@ const AccessDenied: React.FC<AccessDeniedProps> = ({
           title: "Authentication Required",
           description: "Please sign in to access this feature.",
           action: "Sign In",
-          actionHandler: () => navigate('/login')
+          actionHandler: () => navigate('/signin')
         };
       
       case 'insufficient_role':

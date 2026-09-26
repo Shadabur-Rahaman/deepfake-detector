@@ -37,7 +37,7 @@ export const PaymentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
       
-      const response = await fetch(`${API_BASE_URL}/user/usage`, {
+      const response = await fetch(`${API_BASE_URL}/api/user/usage`, {
         headers: { 'Authorization': `Bearer ${token}` },
         signal: controller.signal
       });
@@ -95,7 +95,7 @@ export const PaymentProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // Get token from localStorage for API calls
       const token = localStorage.getItem('ifake_access_token');
       // Create order on backend
-      const orderResponse = await fetch(`${API_BASE_URL}/create-order`, {
+      const orderResponse = await fetch(`${API_BASE_URL}/api/create-order`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -116,7 +116,7 @@ export const PaymentProvider: React.FC<{ children: React.ReactNode }> = ({ child
         order_id: order.id,
         handler: async function (response: any) {
           // Verify payment
-          const verifyResponse = await fetch(`${API_BASE_URL}/verify-payment`, {
+          const verifyResponse = await fetch(`${API_BASE_URL}/api/verify-payment`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

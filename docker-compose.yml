@@ -1,28 +1,78 @@
+# By default `docker compose up --build` runs ONE combined container that serves
+# BOTH the React website (/) AND the FastAPI APIs (/api, /v1, /docs) on port
+# 8000 — same-origin, zero CORS, easiest path to production.
+#
+# If you want a split deploy (separate nginx for frontend + separate backend):
+#   1. Comment out the `# Single-container:` block below
+#   2. Uncomment the `# Split-deploy: backend + frontend (nginx)` block
+#
+# Environment variables come from `config.env` in the repo root (copy
+# config.env.example first). Generate SECRET_KEY before production:
+#   python -c "import secrets; print(secrets.token_urlsafe(32))"
+
 services:
-  backend:
+  # --------------------------------------------------------------------------
+  # Single-container: website + APIs + docs + ws all on :8000 (RECOMMENDED)
+  # --------------------------------------------------------------------------
+  app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Leave VITE_API_URL empty for same-origin (one-container behavior).
+        VITE_API_URL: ""
+        VITE_WS_URL: ""
     ports:
       - "8000:8000"
     env_file:
       - config.env
     environment:
       FORCE_CPU_MODE: "1"
-      CORS_ORIGINS: "http://localhost:5173,http://localhost:8080,http://127.0.0.1:5173"
+      # CORS_ORIGINS is only needed when you serve the frontend from a
+      # DIFFERENT origin. Same-origin = leave it empty.
+      CORS_ORIGINS: ""
+      DEVELOPMENT_MODE: "false"
     volumes:
       - ./ml_artifacts:/app/ml_artifacts
+      - ./uploaded_videos:/app/uploaded_videos
+      - ./downloaded_videos:/app/downloaded_videos
+      - ./deepfake_detection.db:/app/deepfake_detection.db
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
-  frontend:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-      args:
-        VITE_API_URL: http://localhost:8000
-        VITE_WS_URL: ws://localhost:8000/ws/admin
-    ports:
-      - "8080:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
+  # --------------------------------------------------------------------------
+  # Split-deploy: backend + frontend (nginx) — optional, uncomment to use
+  # --------------------------------------------------------------------------
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8000:8000"
+  #   env_file:
+  #     - config.env
+  #   environment:
+  #     FORCE_CPU_MODE: "1"
+  #     CORS_ORIGINS: "http://localhost:8080"
+  #     DEVELOPMENT_MODE: "false"
+  #   volumes:
+  #     - ./ml_artifacts:/app/ml_artifacts
+  #   restart: unless-stopped
+  #
+  # frontend:
+  #   build:
+  #     context: .
+  #     dockerfile: frontend/Dockerfile
+  #     args:
+  #       VITE_API_URL: http://localhost:8000
+  #       VITE_WS_URL: ws://localhost:8000/ws/admin
+  #   ports:
+  #     - "8080:80"
+  #   depends_on:
+  #     - backend
+  #   restart: unless-stopped

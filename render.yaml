@@ -1,0 +1,46 @@
+# render.yaml — Render.com 1-click deploy (Infrastructure as Code)
+#
+# After pushing this file to your repo, open
+#   https://dashboard.render.com/select-repo?type=blueprint
+# pick your repo, and Render will provision exactly one Web Service with
+# Docker, build the single-container image, expose the health check, and
+# assign you a public `onrender.com` URL. No CLI needed.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: ifake-deepfake-detector
+    runtime: docker
+    repo: https://github.com/your-org/deepfake-detector   # override via Render UI or set via repo sync
+    region: oregon
+    plan: starter
+    numInstances: 1
+    dockerCommand: python -m gunicorn backend.app.main:app -c /app/gunicorn.conf.py
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /v1/health
+    autoDeploy: yes
+    pullRequestPreviewsEnabled: no
+    envVars:
+      - key: FORCE_CPU_MODE
+        value: "1"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PORT
+        value: "8000"
+      - key: DEVELOPMENT_MODE
+        value: "false"
+      - key: MAX_CONCURRENT_JOBS
+        value: "2"
+      - key: LOG_LEVEL
+        value: info
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: ""   # empty -> same origin (the default). Override if fronting with a custom domain.
+
+    disk:
+      name: ifake-runtime
+      mountPath: /app/runtime
+      sizeGB: 10

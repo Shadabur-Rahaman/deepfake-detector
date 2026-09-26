@@ -92,10 +92,6 @@ class UnifiedAuthCore:
         
         # Load existing data
         self._load_data()
-        
-        # Create default users if none exist
-        if not self.users:
-            self._create_default_users()
     
     def _load_data(self):
         """Load user data from file"""
@@ -124,59 +120,9 @@ class UnifiedAuthCore:
             logger.warning(f"Failed to save auth data: {e}")
     
     def _create_default_users(self):
-        """Create default users for testing"""
-        try:
-            # Create admin user
-            admin_user = User(
-                id="admin-001",
-                email="admin@ifake.com",
-                username="admin",
-                password_hash=self._hash_password("Admin123!@#"),
-                full_name="System Administrator",
-                is_verified=True,
-                is_active=True,
-                status="active",
-                created_at=datetime.utcnow().isoformat(),
-                roles=["admin", "user"]
-            )
-            self.users[admin_user.id] = admin_user
-            
-            # Create demo user
-            demo_user = User(
-                id="demo-001",
-                email="demo@ifake.com",
-                username="demo",
-                password_hash=self._hash_password("Demo123!@#"),
-                full_name="Demo User",
-                is_verified=True,
-                is_active=True,
-                status="active",
-                created_at=datetime.utcnow().isoformat(),
-                roles=["user"]
-            )
-            self.users[demo_user.id] = demo_user
-            
-            # Create user for testing
-            test_user = User(
-                id="test-001",
-                email="rahamanshadabur@gmail.com",
-                username="rahamanshadabur",
-                password_hash=self._hash_password("Test123!@#"),
-                full_name="Rahaman Shadabur",
-                is_verified=True,
-                is_active=True,
-                status="active",
-                created_at=datetime.utcnow().isoformat(),
-                roles=["user"]
-            )
-            self.users[test_user.id] = test_user
-            
-            self._save_data()
-            logger.info("[OK] Default users created successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to create default users: {e}")
-    
+        """Create default users (production: no hardcoded users)"""
+        return
+
     def _hash_password(self, password: str) -> str:
         """Hash password using bcrypt"""
         try:

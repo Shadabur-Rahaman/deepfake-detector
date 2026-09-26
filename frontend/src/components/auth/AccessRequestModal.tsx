@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/SimpleAuthContext';
 import { useTheme } from '@/lib/theme';
 import { X, Send, Eye, Zap, Crown, CheckCircle, Users, Shield, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_CONFIG } from '@/config/api';
 
 interface AccessRequestModalProps {
   isOpen: boolean;
@@ -64,7 +65,7 @@ export const AccessRequestModal: React.FC<AccessRequestModalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+      const API_BASE_URL = API_CONFIG.BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:8000');
       const response = await fetch(`${API_BASE_URL}/api/auth/request-access`, {
         method: 'POST',
         headers: {

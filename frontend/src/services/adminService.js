@@ -5,17 +5,27 @@
 
 import mockBackend from './mockBackend';
 
+function _apiBase() {
+  return import.meta.env.VITE_API_URL ?? "";
+}
+function _wsBase() {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window === "undefined") return "";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}`;
+}
+
 class AdminService {
   constructor() {
-    this.baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-    this.wsURL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
+    this.baseURL = _apiBase();
+    this.wsURL = `${_wsBase()}/ws`;
     this.websocket = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.listeners = new Map();
     this.isConnected = false;
-    this.useMockBackend = process.env.NODE_ENV === 'development' || !process.env.REACT_APP_API_URL;
-    
+    this.useMockBackend = import.meta.env.DEV && !_apiBase();
+
     // Start mock backend simulation in development
     if (this.useMockBackend) {
       mockBackend.simulateRealtimeUpdates();
